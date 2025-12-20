@@ -158,18 +158,24 @@
                             <span>Sessions (Local)</span>
                             <el-button link type="primary" size="small" @click.stop="openCreateTaskDialog('chat')"><el-icon><Plus /></el-icon></el-button>
                         </div>
-                        <el-dropdown-item v-for="s in sessions" :key="s.id" :command="s" :class="{'!text-blue-400 !bg-blue-900/10': activeTaskId === s.id}">
-                            <div class="flex items-center justify-between w-full gap-3 group/item">
-                                <div class="flex items-center gap-2 overflow-hidden flex-1">
-                                    <el-icon><ChatLineRound /></el-icon>
-                                    <span class="truncate">{{ s.name }}</span>
+                        
+                        <div class="max-h-[200px] overflow-y-auto custom-scrollbar" @scroll="handleSessionScroll">
+                            <el-dropdown-item v-for="s in visibleSessions" :key="s.id" :command="s" :class="{'!text-blue-400 !bg-blue-900/10': activeTaskId === s.id}">
+                                <div class="flex items-center justify-between w-full gap-3 group/item">
+                                    <div class="flex items-center gap-2 overflow-hidden flex-1">
+                                        <el-icon><ChatLineRound /></el-icon>
+                                        <span class="truncate">{{ s.name }}</span>
+                                    </div>
+                                    <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                        <el-icon class="text-gray-500 hover:text-white" @click.stop="startEditTask(s)"><Edit /></el-icon>
+                                        <el-icon class="text-gray-500 hover:text-red-400" @click.stop="deleteTask(s)"><Delete /></el-icon>
+                                    </div>
                                 </div>
-                                <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                                    <el-icon class="text-gray-500 hover:text-white" @click.stop="startEditTask(s)"><Edit /></el-icon>
-                                    <el-icon class="text-gray-500 hover:text-red-400" @click.stop="deleteTask(s)"><Delete /></el-icon>
-                                </div>
+                            </el-dropdown-item>
+                            <div v-if="sessions.length > visibleSessions.length" class="text-center py-2 text-[10px] text-gray-500">
+                                <el-icon class="is-loading"><Loading /></el-icon>
                             </div>
-                        </el-dropdown-item>
+                        </div>
                         <div v-if="sessions.length === 0" class="px-4 py-2 text-xs text-gray-500 italic">No sessions</div>
 
                         <div class="border-t border-gray-700/50 my-2"></div>
@@ -228,7 +234,7 @@
        </div>
 
        <!-- Chat Area -->
-       <div class="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 custom-scrollbar scroll-smooth" ref="chatContainer">
+       <div class="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 custom-scrollbar scroll-smooth" ref="chatContainer" @scroll="handleChatScroll">
           
           <!-- State 1: No Devices Detected - Show Connection Guide -->
           <div v-if="devices.length === 0 && !loadingDevices" class="h-full flex flex-col items-center justify-center animate-fade-in">
@@ -296,7 +302,10 @@
           </div>
 
           <!-- State 3: Active Chat History -->
-          <div v-for="(msg, index) in filteredChatHistory" :key="index" class="group flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+          <div v-if="isLoadingMore" class="w-full flex justify-center py-2 text-gray-500">
+               <el-icon class="is-loading"><Loading /></el-icon>
+          </div>
+          <div v-for="(msg, index) in filteredChatHistory" :key="msg.id || index" class="group flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
              
              <!-- Agent Avatar -->
              <div v-if="msg.role === 'agent'" class="w-8 h-8 mr-3 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20 text-white text-xs font-bold">
@@ -885,9 +894,25 @@ const editName = ref('')
 
 // --- Task State ---
 const sessions = ref<any[]>([])
+const visibleSessionCount = ref(5)
+const visibleSessions = computed(() => sessions.value.slice(0, visibleSessionCount.value))
+
+const handleSessionScroll = (e: Event) => {
+    const target = e.target as HTMLElement
+    // Check if scrolled near bottom (within 20px)
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 20) {
+        if (visibleSessionCount.value < sessions.value.length) {
+            visibleSessionCount.value += 5
+        }
+    }
+}
+
 const backgroundTasks = ref<any[]>([])
 const activeTaskId = ref<string | null>(null)
 const showTaskDialog = ref(false)
+const hasMoreMessages = ref(true)
+const isLoadingMore = ref(false)
+const MESSAGES_PER_PAGE = 20
 const newTask = ref({
     type: 'chat',
     name: '',
@@ -1066,15 +1091,24 @@ const fetchData = async () => {
     }
 
     // Auto-select logic
-    // If we have no sessions/tasks for THIS device, create a default one
-    if (sessions.value.length === 0 && backgroundTasks.value.length === 0) {
-        await createDefaultSession()
-    } else if (!activeTaskId.value) {
-        // Otherwise, select the most recent session (since we sorted them)
-        if (sessions.value.length > 0) {
-            selectTask(sessions.value[0])
-        } else if (backgroundTasks.value.length > 0) {
-            selectTask(backgroundTasks.value[0])
+    if (!activeTaskId.value) {
+        // Check for an existing empty session
+        let emptySession = null;
+        
+        // Check most recent sessions first
+        for (const session of sessions.value) {
+            const msgs = await db.getMessages(session.id);
+            if (msgs.length === 0) {
+                emptySession = session;
+                break; 
+            }
+        }
+
+        if (emptySession) {
+            selectTask(emptySession);
+        } else {
+            // Create a new empty session
+            await createDefaultSession();
         }
     }
 }
@@ -1083,13 +1117,13 @@ const createDefaultSession = async () => {
     const id = uuidv4()
     const session = {
         id,
-        name: 'Session 1',
+        name: `Session ${sessions.value.length + 1}`,
         type: 'chat',
         deviceId: activeDeviceId.value,
         createdAt: Date.now()
     }
     await db.addSession(session)
-    sessions.value.push(session)
+    sessions.value.unshift(session)
     selectTask(session)
 }
 
@@ -1112,7 +1146,7 @@ const createTask = async () => {
             createdAt: Date.now()
         }
         await db.addSession(session)
-        sessions.value.push(session)
+        sessions.value.unshift(session)
         showTaskDialog.value = false
         selectTask(session)
     } else {
@@ -1138,11 +1172,11 @@ const createTask = async () => {
 const selectTask = async (task: any) => {
     activeTaskId.value = task.id
     chatHistory.value = []
+    hasMoreMessages.value = true
     
     if (task.type === 'chat') {
-        // Load from DB
-        const messages = await db.getMessages(task.id)
-        chatHistory.value = messages
+        // Load from DB (Paged)
+        await loadMessages(task.id)
     } else {
         // Load from Backend
         try {
@@ -1157,6 +1191,49 @@ const selectTask = async (task: any) => {
         }
     }
     scrollToBottom()
+}
+
+const loadMessages = async (sessionId: string, beforeId?: number) => {
+    try {
+        const msgs = await db.getMessages(sessionId, MESSAGES_PER_PAGE, beforeId)
+        if (msgs.length < MESSAGES_PER_PAGE) {
+            hasMoreMessages.value = false
+        }
+        
+        if (beforeId) {
+            chatHistory.value = [...msgs, ...chatHistory.value]
+        } else {
+            chatHistory.value = msgs
+        }
+    } catch (e) {
+        console.error('Failed to load messages', e)
+    }
+}
+
+const handleChatScroll = async (e: Event) => {
+    const target = e.target as HTMLElement
+    if (target.scrollTop === 0 && hasMoreMessages.value && !isLoadingMore.value && activeTaskId.value) {
+        // Load more
+        isLoadingMore.value = true
+        // Capture the ID of the top message before loading
+        const oldestId = chatHistory.value[0]?.id
+        const oldScrollHeight = target.scrollHeight
+        
+        if (oldestId) {
+            await loadMessages(activeTaskId.value, oldestId)
+            
+            // Wait for DOM update
+            nextTick(() => {
+                // Adjust scroll position to maintain stability
+                const newScrollHeight = target.scrollHeight
+                const diff = newScrollHeight - oldScrollHeight
+                if (diff > 0) {
+                    target.scrollTop = diff
+                }
+            })
+        }
+        isLoadingMore.value = false
+    }
 }
 
 const convertLogsToChat = (logs: any[]) => {
@@ -2024,6 +2101,7 @@ onMounted(async () => {
 
 watch(activeDeviceId, (newId) => {
     if (newId) {
+        visibleSessionCount.value = 5
         activeTaskId.value = null 
         chatHistory.value = []
         fetchDeviceApps(newId)

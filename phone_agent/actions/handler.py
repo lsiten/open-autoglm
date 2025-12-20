@@ -37,10 +37,12 @@ class ActionHandler:
         device_id: str | None = None,
         confirmation_callback: Callable[[str], bool] | None = None,
         takeover_callback: Callable[[str], None] | None = None,
+        input_callback: Callable[[str], str] | None = None,
     ):
         self.device_id = device_id
         self.confirmation_callback = confirmation_callback or self._default_confirmation
         self.takeover_callback = takeover_callback or self._default_takeover
+        self.input_callback = input_callback or self._default_input
 
     def execute(
         self, action: dict[str, Any], screen_width: int, screen_height: int, current_app: str = None
@@ -141,10 +143,11 @@ class ActionHandler:
         if not self._check_sensitive_permission("install_app", f"Install app '{app_name}'"):
             return ActionResult(False, True, "User denied app installation")
 
+        # Permission granted, instruct LLM to proceed with installation
         return ActionResult(
             success=False, 
             should_finish=False, 
-            message=f"App '{app_name}' is not installed. Asking user for permission is required to install it."
+            message=f"App '{app_name}' is not installed. Permission to install is granted. Please proceed to install it using the application market."
         )
 
     def _check_sensitive_permission(self, permission_key: str, message: str) -> bool:
@@ -322,7 +325,15 @@ class ActionHandler:
     def _handle_interact(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle interaction request (user choice needed)."""
         # This action signals that user input is needed
-        return ActionResult(True, False, message="User interaction required")
+        # Check if message is provided in action?
+        # The prompt says: "Interact是当有多个满足条件的选项时而触发的交互操作，询问用户如何选择。"
+        # We can try to extract a 'message' or 'question' from kwargs if available, or use default.
+        # But 'do(action="Interact")' usually has no args.
+        # Let's check if the model provided 'message'.
+        message = action.get("message", "Please provide input or choice for the next step.")
+        
+        user_response = self.input_callback(message)
+        return ActionResult(True, False, message=f"User input: {user_response}")
 
     def _send_keyevent(self, keycode: str) -> None:
         """Send a keyevent to the device."""
@@ -396,6 +407,11 @@ class ActionHandler:
     def _default_takeover(message: str) -> None:
         """Default takeover callback using console input."""
         input(f"{message}\nPress Enter after completing manual operation...")
+
+    @staticmethod
+    def _default_input(message: str) -> str:
+        """Default input callback using console input."""
+        return input(f"{message}\nInput: ")
 
 
 def parse_action(response: str) -> dict[str, Any]:

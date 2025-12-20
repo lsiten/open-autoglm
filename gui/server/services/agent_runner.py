@@ -117,6 +117,83 @@ class AgentRunner:
             
         return approved
 
+    def _input_callback(self, task_id: str, message: str) -> str:
+        """
+        Callback for requesting user input.
+        Blocks until user responds via API.
+        """
+        self._emit_log(task_id, "warn", f"Waiting for input: {message}")
+        
+        event = threading.Event()
+        self.pending_interactions[task_id] = {"event": event, "response": None}
+        
+        # Send UI Card
+        if self.main_loop and self.main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                stream_manager.broadcast({
+                    "type": "interaction",
+                    "taskId": task_id,
+                    "data": {
+                        "type": "input",
+                        "title": "Input Required",
+                        "content": message,
+                        "placeholder": "Enter value..."
+                    }
+                }),
+                self.main_loop
+            )
+            
+        task_data = self.active_tasks.get(task_id)
+        while not event.is_set():
+            if task_data and task_data["stop_event"].is_set():
+                del self.pending_interactions[task_id]
+                return ""
+            time.sleep(0.5)
+            
+        response = self.pending_interactions[task_id]["response"]
+        del self.pending_interactions[task_id]
+        
+        self._emit_log(task_id, "info", f"User provided input: {response}")
+        return str(response)
+
+    def _takeover_callback(self, task_id: str, message: str) -> None:
+        """
+        Callback for takeover request.
+        Blocks until user confirms completion.
+        """
+        self._emit_log(task_id, "warn", f"Manual Takeover: {message}")
+        
+        event = threading.Event()
+        self.pending_interactions[task_id] = {"event": event, "response": None}
+        
+        # Send UI Card
+        if self.main_loop and self.main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                stream_manager.broadcast({
+                    "type": "interaction",
+                    "taskId": task_id,
+                    "data": {
+                        "type": "confirm",
+                        "title": "Manual Takeover Required",
+                        "content": message,
+                        "options": [
+                            {"label": "I have finished", "value": "Done", "type": "success"}
+                        ]
+                    }
+                }),
+                self.main_loop
+            )
+            
+        task_data = self.active_tasks.get(task_id)
+        while not event.is_set():
+            if task_data and task_data["stop_event"].is_set():
+                del self.pending_interactions[task_id]
+                return
+            time.sleep(0.5)
+            
+        del self.pending_interactions[task_id]
+        self._emit_log(task_id, "info", "User finished manual takeover.")
+
     # Legacy method wrapper for backward compatibility
     def start_task(self, prompt: str):
         device_id = device_manager.active_device_id
@@ -222,7 +299,9 @@ class AgentRunner:
                     verbose=True,
                     installed_apps=installed_apps
                 ),
-                confirmation_callback=lambda msg: self._confirmation_callback(task.id, msg)
+                confirmation_callback=lambda msg: self._confirmation_callback(task.id, msg),
+                input_callback=lambda msg: self._input_callback(task.id, msg),
+                takeover_callback=lambda msg: self._takeover_callback(task.id, msg)
             )
             
             step_count = 0

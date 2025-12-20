@@ -68,6 +68,7 @@ class PhoneAgent:
         agent_config: AgentConfig | None = None,
         confirmation_callback: Callable[[str], bool] | None = None,
         takeover_callback: Callable[[str], None] | None = None,
+        input_callback: Callable[[str], str] | None = None,
     ):
         self.model_config = model_config or ModelConfig()
         self.agent_config = agent_config or AgentConfig()
@@ -77,6 +78,7 @@ class PhoneAgent:
             device_id=self.agent_config.device_id,
             confirmation_callback=confirmation_callback,
             takeover_callback=takeover_callback,
+            input_callback=input_callback,
         )
 
         self._context: list[dict[str, Any]] = []
@@ -166,7 +168,34 @@ class PhoneAgent:
             screen_info = MessageBuilder.build_screen_info(
                 current_app, installed_apps=self.agent_config.installed_apps
             )
-            text_content = f"** Screen Info **\n\n{screen_info}"
+            # Inject result message from previous step if available
+            result_msg_str = ""
+            if len(self._context) > 0 and self._context[-1].get("role") == "assistant":
+                 # Check if we have a result message stored somewhere? 
+                 # Actually, we can just use the 'message' from StepResult, but we are inside _execute_step.
+                 # We don't have access to the *previous* result easily unless we store it.
+                 # But wait, the loop in run() or step() calls _execute_step.
+                 # Let's modify _execute_step to accept an optional 'previous_result_message'.
+                 # OR, better: The Model sees its own output <answer>action</answer>.
+                 # If the action failed or had a result message (like "User input: 123456"), we MUST tell the model.
+                 pass
+
+            # We need to pass the result message to the prompt.
+            # The cleanest way is to append it to the text content.
+            
+            # Since we can't easily change the method signature of _execute_step without breaking things or managing state,
+            # let's assume we want to pass "system feedback" about the last action.
+            # But here we are building the User message for the CURRENT step.
+            
+            # Let's change how we call _execute_step in the loop?
+            # No, let's store `last_action_result` in `self`.
+            
+            additional_info = ""
+            if hasattr(self, '_last_action_result_message') and self._last_action_result_message:
+                additional_info = f"\n\n** Last Action Result **\n{self._last_action_result_message}"
+                self._last_action_result_message = None # Clear it
+
+            text_content = f"** Screen Info **\n\n{screen_info}{additional_info}"
 
             self._context.append(
                 MessageBuilder.create_user_message(
@@ -215,6 +244,9 @@ class PhoneAgent:
             result = self.action_handler.execute(
                 action, screenshot.width, screenshot.height, current_app=current_app
             )
+            # Store message for next step context if it's significant (not just None)
+            if result.message:
+                self._last_action_result_message = result.message
         except Exception as e:
             if self.agent_config.verbose:
                 traceback.print_exc()

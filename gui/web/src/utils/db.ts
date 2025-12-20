@@ -74,13 +74,39 @@ export const db = {
   },
 
   // --- Messages ---
-  async getMessages(sessionId: string) {
+  async getMessages(sessionId: string, limit?: number, beforeId?: number) {
     const db = await dbPromise
-    // If sessionId is provided, use index
-    if (sessionId) {
-        return db.getAllFromIndex(STORE_MESSAGES, 'sessionId', sessionId)
+    // If no limit, use old behavior (fetch all)
+    if (!limit) {
+        if (sessionId) {
+            return db.getAllFromIndex(STORE_MESSAGES, 'sessionId', sessionId)
+        }
+        return db.getAll(STORE_MESSAGES)
     }
-    return db.getAll(STORE_MESSAGES)
+
+    const tx = db.transaction(STORE_MESSAGES, 'readonly')
+    const index = tx.store.index('sessionId')
+    let cursor = await index.openCursor(IDBKeyRange.only(sessionId), 'prev')
+    
+    const messages: any[] = []
+    let foundMarker = !beforeId // If no beforeId, we start collecting immediately
+
+    while (cursor && messages.length < limit) {
+        // If we have a beforeId, we need to skip until we find it
+        if (!foundMarker) {
+            if (cursor.primaryKey === beforeId) {
+                foundMarker = true
+            }
+            // Always continue if we haven't found the marker OR if we just found it (we want the one *after* it in prev order)
+            cursor = await cursor.continue()
+            continue
+        }
+        
+        messages.push(cursor.value)
+        cursor = await cursor.continue()
+    }
+    
+    return messages.reverse()
   },
 
   async addMessage(message: any) {
