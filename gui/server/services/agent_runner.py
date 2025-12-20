@@ -265,7 +265,8 @@ class AgentRunner:
             "stop_event": stop_event,
             "screen_change_event": screen_change_event,
             "screen_change_callback": on_screen_change,
-            "detection_lock": detection_lock
+            "detection_lock": detection_lock,
+            "device_id": task.device_id
         }
         thread.start()
         task_manager.update_status(task_id, "running")
@@ -324,7 +325,9 @@ class AgentRunner:
         
         try:
             display_name = prompt[:50] + "..." if len(prompt) > 50 else prompt
-            self._emit_log(task.id, "info", f"Starting task: {display_name}")
+            # Get screenshot for starting task log
+            start_screenshot = self._get_screenshot_for_task(task.id)
+            self._emit_log(task.id, "info", f"Starting task: {display_name}", start_screenshot)
             
             model_config = ModelConfig(
                 base_url=self.base_url,
@@ -356,7 +359,9 @@ class AgentRunner:
             if task.type == 'background':
                 max_steps = 1000 # Larger limit
             
-            self._emit_log(task.id, "info", "Analyzing screen...")
+            # Get screenshot for analyzing screen log
+            analyze_screenshot = self._get_screenshot_for_task(task.id)
+            self._emit_log(task.id, "info", "Analyzing screen...", analyze_screenshot)
             
             def on_token(token):
                 self._emit_log(task.id, "thought", token)
@@ -372,7 +377,9 @@ class AgentRunner:
                     # Run one detection cycle
                     while not result.finished and step_count < max_steps and not stop_event.is_set():
                         step_count += 1
-                        self._emit_log(task.id, "info", f"Step {step_count}...")
+                        # Get screenshot for step log
+                        step_screenshot = self._get_screenshot_for_task(task.id)
+                        self._emit_log(task.id, "info", f"Step {step_count}...", step_screenshot)
                         
                         result = agent.step(on_token=on_token)
                         self._handle_step_result(task.id, result)
@@ -411,10 +418,12 @@ class AgentRunner:
                         detection_lock.acquire()
                     
                     try:
+                        # Get screenshot for detection cycle log
+                        cycle_screenshot = self._get_screenshot_for_task(task.id)
                         if screen_changed:
-                            self._emit_log(task.id, "info", "Starting detection cycle due to screen change...")
+                            self._emit_log(task.id, "info", "Starting detection cycle due to screen change...", cycle_screenshot)
                         else:
-                            self._emit_log(task.id, "info", "Starting periodic detection cycle...")
+                            self._emit_log(task.id, "info", "Starting periodic detection cycle...", cycle_screenshot)
                         result = agent.step(final_prompt, on_token=on_token)
                         self._handle_step_result(task.id, result)
                     finally:
@@ -424,7 +433,9 @@ class AgentRunner:
                 # For chat tasks, run normally
                 while not result.finished and step_count < max_steps and not stop_event.is_set():
                     step_count += 1
-                    self._emit_log(task.id, "info", f"Step {step_count}...")
+                    # Get screenshot for step log
+                    step_screenshot = self._get_screenshot_for_task(task.id)
+                    self._emit_log(task.id, "info", f"Step {step_count}...", step_screenshot)
                     
                     result = agent.step(on_token=on_token)
                     self._handle_step_result(task.id, result)
@@ -458,28 +469,56 @@ class AgentRunner:
                 del self.active_tasks[task.id]
             loop.close()
 
+    def _get_screenshot_for_task(self, task_id: str) -> str:
+        """Get screenshot for a task. Returns base64 string or None."""
+        try:
+            task_data = self.active_tasks.get(task_id)
+            if task_data:
+                device_id = task_data.get("device_id")
+                if device_id:
+                    # Try to get screenshot from screen_streamer first (faster)
+                    if screen_streamer.latest_frame:
+                        import base64
+                        return base64.b64encode(screen_streamer.latest_frame).decode('utf-8')
+                    else:
+                        # Fallback: get screenshot directly from device
+                        factory = get_device_factory()
+                        screenshot = factory.get_screenshot(device_id, quality=50, max_width=540)
+                        if screenshot and screenshot.base64_data:
+                            return screenshot.base64_data
+        except Exception as e:
+            # Don't fail if screenshot capture fails
+            pass
+        return None
+
     def _handle_step_result(self, task_id: str, result: StepResult):
+        # Get screenshot for this step
+        screenshot_base64 = self._get_screenshot_for_task(task_id)
+        
         if result.thinking:
-            self._emit_log(task_id, "thought", result.thinking)
+            self._emit_log(task_id, "thought", result.thinking, screenshot_base64)
         
         if result.action and not result.finished:
             # Format action for display
             action_str = json.dumps(result.action, ensure_ascii=False)
-            self._emit_log(task_id, "action", action_str)
+            self._emit_log(task_id, "action", action_str, screenshot_base64)
 
-    def _emit_log(self, task_id: str, level: str, message: str):
+    def _emit_log(self, task_id: str, level: str, message: str, screenshot: str = None):
         # Store in DB
-        task_manager.add_log(task_id, level, message)
+        task_manager.add_log(task_id, level, message, screenshot)
         
         # Broadcast to frontend
         if self.main_loop and self.main_loop.is_running():
+            log_data = {
+                "type": "log",
+                "taskId": task_id,
+                "level": level,
+                "message": message
+            }
+            if screenshot:
+                log_data["screenshot"] = screenshot
             asyncio.run_coroutine_threadsafe(
-                stream_manager.broadcast({
-                    "type": "log",
-                    "taskId": task_id,
-                    "level": level,
-                    "message": message
-                }),
+                stream_manager.broadcast(log_data),
                 self.main_loop
             )
         else:

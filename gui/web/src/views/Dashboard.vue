@@ -354,15 +354,47 @@
 
                 <!-- Agent Components -->
                 <template v-else>
-                    <!-- Thought Process (Always Visible if present) -->
+                    <!-- Thought Process (Collapsible) -->
                     <div v-if="msg.thought" class="mb-2 w-full max-w-xl">
                        <div class="bg-[#1c2128] border border-gray-700/50 rounded-xl overflow-hidden">
-                          <div class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center gap-2">
-                             <el-icon class="text-amber-500" :class="{ 'is-loading': msg.isThinking }"><Loading v-if="msg.isThinking" /><Cpu v-else /></el-icon>
-                             <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.reasoning_chain') }}</span>
+                          <div 
+                             class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center justify-between cursor-pointer hover:bg-[#2a3038] transition-colors"
+                             @click="messageCollapseState[index] = { ...messageCollapseState[index], thought: !(messageCollapseState[index]?.thought ?? false) }"
+                          >
+                             <div class="flex items-center gap-2">
+                                <el-icon class="text-amber-500" :class="{ 'is-loading': msg.isThinking }"><Loading v-if="msg.isThinking" /><Cpu v-else /></el-icon>
+                                <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.reasoning_chain') }}</span>
+                             </div>
+                             <el-icon class="text-gray-500 text-xs transition-transform" :class="{ 'rotate-180': messageCollapseState[index]?.thought ?? false }">
+                                <ArrowDown />
+                             </el-icon>
                           </div>
-                          <div class="p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-5 bg-[#0d1117] max-h-64 overflow-y-auto custom-scrollbar">
+                          <div 
+                             v-show="!(messageCollapseState[index]?.thought ?? false)"
+                             class="p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-5 bg-[#0d1117] max-h-64 overflow-y-auto custom-scrollbar"
+                          >
                              {{ msg.thought }}
+                          </div>
+                       </div>
+                    </div>
+
+                    <!-- Screenshot (Collapsible) -->
+                    <div v-if="msg.screenshot" class="mb-2 w-full max-w-xl">
+                       <div class="bg-[#1c2128] border border-gray-700/50 rounded-xl overflow-hidden">
+                          <div 
+                             class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center justify-between cursor-pointer hover:bg-[#2a3038] transition-colors"
+                             @click="messageCollapseState[index] = { ...messageCollapseState[index], screenshot: !(messageCollapseState[index]?.screenshot ?? false) }"
+                          >
+                             <div class="flex items-center gap-2">
+                                <el-icon class="text-blue-500"><Picture /></el-icon>
+                                <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.screenshot') }}</span>
+                             </div>
+                             <el-icon class="text-gray-500 text-xs transition-transform" :class="{ 'rotate-180': messageCollapseState[index]?.screenshot ?? false }">
+                                <ArrowDown />
+                             </el-icon>
+                          </div>
+                          <div v-show="!(messageCollapseState[index]?.screenshot ?? false)" class="p-3 bg-[#0d1117]">
+                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-gray-700/50" />
                           </div>
                        </div>
                     </div>
@@ -842,6 +874,9 @@ const taskStatuses = ref<Record<string, string>>({}) // taskId/sessionId -> stat
 const startingTask = ref(false)
 const stoppingTask = ref(false)
 const chatHistory = ref<any[]>([])
+
+// Collapse state for messages (key: message index, value: { thought: boolean, screenshot: boolean })
+const messageCollapseState = ref<Record<number, { thought?: boolean, screenshot?: boolean }>>({})
 
 // Computed status for current active task/session
 const agentStatus = computed(() => {
@@ -1328,35 +1363,80 @@ const convertLogsToChat = (logs: any[]) => {
     logs.sort((a, b) => a.timestamp - b.timestamp)
     
     for (const log of logs) {
+        // Prepare screenshot data if present
+        const screenshotData = log.screenshot ? `data:image/jpeg;base64,${log.screenshot}` : null
+        
         if (log.level === 'thought') {
              if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
                  lastMsg.thought += log.message
+                 // Update screenshot if provided
+                 if (screenshotData && !lastMsg.screenshot) {
+                     lastMsg.screenshot = screenshotData
+                 }
              } else {
-                 lastMsg = { role: 'agent', thought: log.message, isThinking: true }
+                 lastMsg = { 
+                     role: 'agent', 
+                     thought: log.message, 
+                     isThinking: true,
+                     screenshot: screenshotData
+                 }
                  history.push(lastMsg)
              }
         } else if (log.level === 'success') {
              if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
                  lastMsg.isThinking = false
                  lastMsg.content = log.message
+                 // Update screenshot if provided
+                 if (screenshotData && !lastMsg.screenshot) {
+                     lastMsg.screenshot = screenshotData
+                 }
              } else {
-                 history.push({ role: 'agent', content: log.message })
+                 history.push({ 
+                     role: 'agent', 
+                     content: log.message,
+                     screenshot: screenshotData
+                 })
              }
              lastMsg = null
         } else if (log.level === 'info') {
              if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
                  lastMsg.thought += '\n[INFO] ' + log.message
+                 // Update screenshot if provided
+                 if (screenshotData && !lastMsg.screenshot) {
+                     lastMsg.screenshot = screenshotData
+                 }
+             } else {
+                 // Create a new info message if no thinking message exists
+                 history.push({ 
+                     role: 'agent', 
+                     content: log.message,
+                     screenshot: screenshotData,
+                     isInfo: true  // Mark as info message for styling
+                 })
+                 lastMsg = null
              }
         } else if (log.level === 'action') {
              if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
                  lastMsg.action = log.message
                  lastMsg.isThinking = false
+                 // Update screenshot if provided
+                 if (screenshotData && !lastMsg.screenshot) {
+                     lastMsg.screenshot = screenshotData
+                 }
              } else {
-                 history.push({ role: 'agent', action: log.message })
+                 history.push({ 
+                     role: 'agent', 
+                     action: log.message,
+                     screenshot: screenshotData
+                 })
                  lastMsg = null
              }
         } else if (log.level === 'error') {
-             history.push({ role: 'agent', content: `${t('common.error_prefix')}${log.message}` })
+             history.push({ 
+                 role: 'agent', 
+                 content: `${t('common.error_prefix')}${log.message}`,
+                 screenshot: screenshotData
+             })
              lastMsg = null
         }
     }
