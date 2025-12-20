@@ -445,14 +445,23 @@ class AgentRunner:
                  task_manager.update_status(task.id, "stopped")
                  self._emit_status(task.id, "stopped")
             elif task.type != 'background' and result.finished:
-                 # Only mark as completed for non-background tasks
-                 self._emit_log(task.id, "success", f"Task completed: {result.message}")
-                 task_manager.update_status(task.id, "completed")
-                 self._emit_status(task.id, "completed")
+                 # Check if task completed successfully or failed
+                 if result.success:
+                     # Task completed successfully
+                     self._emit_log(task.id, "success", f"Task completed: {result.message}")
+                     task_manager.update_status(task.id, "completed")
+                     self._emit_status(task.id, "completed")
+                 else:
+                     # Task finished but failed
+                     failure_reason = result.message or "任务执行失败，原因未知"
+                     self._emit_log(task.id, "error", f"无法完成任务：{failure_reason}")
+                     task_manager.update_status(task.id, "error")
+                     self._emit_status(task.id, "error")
             elif task.type != 'background':
-                 self._emit_log(task.id, "warn", "Max steps reached.")
-                 task_manager.update_status(task.id, "stopped")
-                 self._emit_status(task.id, "stopped")
+                 # Task cannot be completed - reached max steps
+                 self._emit_log(task.id, "error", "无法完成任务：已达到最大执行步数，任务可能过于复杂或无法在当前条件下完成。")
+                 task_manager.update_status(task.id, "error")
+                 self._emit_status(task.id, "error")
             
         except Exception as e:
             traceback.print_exc()

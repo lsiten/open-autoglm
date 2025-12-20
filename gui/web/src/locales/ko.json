@@ -44,6 +44,8 @@
     "screenshot": "AI가 본 화면",
     "expand": "펼치기",
     "collapse": "접기",
+    "task_failed": "작업을 완료할 수 없습니다",
+    "failure_reason": "실패 이유",
     "error_start_task": "작업 시작 실패",
     "step_1": "1단계",
     "step_2": "2단계",

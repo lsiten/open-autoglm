@@ -44,6 +44,8 @@
     "screenshot": "AIが見た画面",
     "expand": "展開",
     "collapse": "折りたたむ",
+    "task_failed": "タスクが完了できませんでした",
+    "failure_reason": "失敗の理由",
     "error_start_task": "タスクの開始に失敗しました",
     "step_1": "ステップ 1",
     "step_2": "ステップ 2",

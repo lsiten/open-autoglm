@@ -44,6 +44,8 @@
     "screenshot": "AI看到的画面",
     "expand": "展开",
     "collapse": "折叠",
+    "task_failed": "任务无法完成",
+    "failure_reason": "失败原因",
     "error_start_task": "任务启动失败",
     "input_submitted": "输入已提交",
     "selected": "已选择：",

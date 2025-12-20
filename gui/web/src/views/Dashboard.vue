@@ -376,7 +376,12 @@
                              <div class="text-sm text-blue-200 font-medium mb-1">{{ msg.content }}</div>
                              <!-- Screenshot for info messages -->
                              <div v-if="msg.screenshot" class="mt-2">
-                                <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-blue-500/30 shadow-lg" />
+                                <img 
+                                   :src="msg.screenshot" 
+                                   alt="Screenshot" 
+                                   class="max-w-[72px] h-auto rounded-lg border border-blue-500/30 shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                                   @click="openImagePreview(msg.screenshot)"
+                                />
                              </div>
                           </div>
                        </div>
@@ -390,7 +395,12 @@
                                 <el-icon class="text-indigo-400"><Picture /></el-icon>
                                 <span class="text-xs font-medium text-indigo-300 uppercase tracking-wide">{{ t('chat.screenshot') }}</span>
                              </div>
-                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-indigo-500/30 shadow-lg" />
+                             <img 
+                                :src="msg.screenshot" 
+                                alt="Screenshot" 
+                                class="max-w-[72px] h-auto rounded-lg border border-indigo-500/30 shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                                @click="openImagePreview(msg.screenshot)"
+                             />
                           </div>
                        </div>
                     </div>
@@ -417,7 +427,12 @@
                           ></div>
                           <!-- Screenshot for think messages -->
                           <div v-if="msg.screenshot && !(messageCollapseState[index]?.thought ?? true)" class="px-4 pb-3">
-                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-amber-500/30 shadow-lg" />
+                             <img 
+                                :src="msg.screenshot" 
+                                alt="Screenshot" 
+                                class="max-w-[72px] h-auto rounded-lg border border-amber-500/30 shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                                @click="openImagePreview(msg.screenshot)"
+                             />
                           </div>
                        </div>
                     </div>
@@ -438,12 +453,40 @@
                              <div v-else-if="msg.content" class="text-sm text-green-200 leading-relaxed" v-html="formatAnswer(msg.content)"></div>
                              <!-- Screenshot for answer messages -->
                              <div v-if="msg.screenshot && (msg.action || msg.content)" class="mt-3">
-                                <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-green-500/30 shadow-lg" />
+                                <img 
+                                   :src="msg.screenshot" 
+                                   alt="Screenshot" 
+                                   class="max-w-[72px] h-auto rounded-lg border border-green-500/30 shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                                   @click="openImagePreview(msg.screenshot)"
+                                />
                              </div>
                           </div>
                        </div>
                     </div>
 
+                    <!-- Task Failed/Error (Distinct Style - Red) -->
+                    <div v-if="msg.isFailed || msg.isError" class="mb-2 w-full max-w-xl">
+                       <div class="bg-red-500/10 border-l-4 border-red-500 rounded-r-lg overflow-hidden">
+                          <div class="px-4 py-3 flex items-start gap-3">
+                             <div class="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                                <el-icon class="text-red-400" :size="14"><CircleCloseFilled /></el-icon>
+                             </div>
+                             <div class="flex-1">
+                                <div class="text-sm text-red-300 font-semibold mb-1">{{ t('chat.task_failed') || '任务无法完成' }}</div>
+                                <div class="text-sm text-red-200 leading-relaxed">{{ msg.content || msg.message || msg.reason }}</div>
+                                <!-- Screenshot for failed messages -->
+                                <div v-if="msg.screenshot" class="mt-3">
+                                   <img 
+                                      :src="msg.screenshot" 
+                                      alt="Screenshot" 
+                                      class="max-w-[72px] h-auto rounded-lg border border-red-500/30 shadow-lg cursor-pointer hover:opacity-80 transition-opacity"
+                                      @click="openImagePreview(msg.screenshot)"
+                                   />
+                                </div>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
 
                     <!-- Interaction: Confirmation/Choice -->
                     <div v-if="msg.type === 'confirm'" class="mt-2 w-full max-w-sm bg-[#1c2128] border border-blue-500/30 rounded-xl overflow-hidden shadow-lg animate-fade-in">
@@ -879,11 +922,53 @@
          </div>
        </template>
     </el-dialog>
+
+    <!-- Image Preview Dialog -->
+    <el-dialog 
+       v-model="imagePreviewVisible" 
+       :title="`${t('chat.screenshot')} (${imagePreviewIndex + 1} / ${sessionImages.length})`" 
+       width="90%" 
+       class="custom-dialog image-preview-dialog"
+       align-center
+       @close="imagePreviewUrl = ''; sessionImages = []; imagePreviewIndex = 0"
+    >
+       <div class="relative flex justify-center items-center bg-black/50 rounded-lg p-4 min-h-[400px]">
+          <!-- Previous Button -->
+          <el-button 
+             v-if="sessionImages.length > 1"
+             circle 
+             class="absolute left-4 z-10 !bg-black/50 !border-white/20 hover:!bg-black/70"
+             @click="showPreviousImage"
+             :disabled="imagePreviewIndex === 0"
+          >
+             <el-icon><ArrowLeft /></el-icon>
+          </el-button>
+          
+          <!-- Image -->
+          <img 
+             v-if="imagePreviewUrl" 
+             :src="imagePreviewUrl" 
+             alt="Preview" 
+             class="max-w-full max-h-[80vh] h-auto rounded-lg shadow-2xl"
+          />
+          
+          <!-- Next Button -->
+          <el-button 
+             v-if="sessionImages.length > 1"
+             circle 
+             class="absolute right-4 z-10 !bg-black/50 !border-white/20 hover:!bg-black/70"
+             @click="showNextImage"
+             :disabled="imagePreviewIndex === sessionImages.length - 1"
+          >
+             <el-icon><ArrowRight /></el-icon>
+          </el-button>
+       </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import QrcodeVue from 'qrcode.vue'
@@ -909,6 +994,12 @@ const chatHistory = ref<any[]>([])
 // true = collapsed, false = expanded
 // Default: think and info messages are collapsed (true)
 const messageCollapseState = ref<Record<number, { thought?: boolean, screenshot?: boolean, info?: boolean }>>({})
+
+// Image preview state
+const imagePreviewVisible = ref(false)
+const imagePreviewUrl = ref('')
+const imagePreviewIndex = ref(0)
+const sessionImages = ref<string[]>([])
 
 // Escape HTML to prevent XSS
 const escapeHtml = (text: string): string => {
@@ -1546,8 +1637,11 @@ const convertLogsToChat = (logs: any[]) => {
         } else if (log.level === 'error') {
              history.push({ 
                  role: 'agent', 
-                 content: `${t('common.error_prefix')}${log.message}`,
-                 screenshot: screenshotData
+                 content: log.message,
+                 screenshot: screenshotData,
+                 isFailed: true,  // Mark as failed message for red styling
+                 isError: true,
+                 reason: log.message  // Store the failure reason
              })
              lastMsg = null
         }
@@ -2471,9 +2565,12 @@ const handleLog = (data: any) => {
       ElMessage.error(data.message)
       const errorMsg: any = { 
         role: 'agent', 
-        content: `${t('common.error_prefix')}${data.message}`, 
+        content: data.message, 
         sessionId: activeTaskId.value,
-        screenshot: screenshotData
+        screenshot: screenshotData,
+        isFailed: true,  // Mark as failed message for red styling
+        isError: true,
+        reason: data.message  // Store the failure reason
       }
       chatHistory.value.push(errorMsg)
       if (!isBackground) db.addMessage(errorMsg).then(id => errorMsg.id = id)
@@ -2542,6 +2639,67 @@ watch(activeTaskId, (newId, oldId) => {
         taskLogRefreshInterval.value = null
     }
 })
+
+// Image preview functions
+const openImagePreview = (imageUrl: string) => {
+    // Collect all images from current session
+    const images: string[] = []
+    chatHistory.value.forEach((msg: any) => {
+        if (msg.screenshot) {
+            images.push(msg.screenshot)
+        }
+    })
+    
+    if (images.length === 0) {
+        return
+    }
+    
+    sessionImages.value = images
+    const index = images.indexOf(imageUrl)
+    imagePreviewIndex.value = index >= 0 ? index : 0
+    imagePreviewUrl.value = sessionImages.value[imagePreviewIndex.value]
+    imagePreviewVisible.value = true
+}
+
+const showPreviousImage = () => {
+    if (imagePreviewIndex.value > 0) {
+        imagePreviewIndex.value--
+        imagePreviewUrl.value = sessionImages.value[imagePreviewIndex.value]
+    }
+}
+
+const showNextImage = () => {
+    if (imagePreviewIndex.value < sessionImages.value.length - 1) {
+        imagePreviewIndex.value++
+        imagePreviewUrl.value = sessionImages.value[imagePreviewIndex.value]
+    }
+}
+
+// Keyboard navigation for image preview
+const handleImagePreviewKeydown = (e: KeyboardEvent) => {
+    if (!imagePreviewVisible.value) return
+    
+    if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        showPreviousImage()
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        showNextImage()
+    } else if (e.key === 'Escape') {
+        e.preventDefault()
+        imagePreviewVisible.value = false
+    }
+}
+
+// Add keyboard event listener
+onMounted(() => {
+    window.addEventListener('keydown', handleImagePreviewKeydown)
+})
+
+// Remove keyboard event listener
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleImagePreviewKeydown)
+})
 </script>
 
 <style scoped>
@@ -2578,6 +2736,11 @@ watch(activeTaskId, (newId, oldId) => {
 :deep(.el-dialog__title) { color: #e6edf3; }
 :deep(.el-form-item__label) { color: #8b949e; }
 :deep(.el-dialog__headerbtn .el-dialog__close) { color: #8b949e; }
+
+/* Image Preview Dialog */
+:deep(.image-preview-dialog .el-dialog__body) {
+  padding: 0;
+}
 
 /* Transitions */
 .slide-fade-enter-active,

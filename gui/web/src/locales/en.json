@@ -44,6 +44,8 @@
     "screenshot": "Screenshot Seen by AI",
     "expand": "Expand",
     "collapse": "Collapse",
+    "task_failed": "Task Failed",
+    "failure_reason": "Failure Reason",
     "error_start_task": "Failed to start task",
     "step_1": "Step 1",
     "step_2": "Step 2",
