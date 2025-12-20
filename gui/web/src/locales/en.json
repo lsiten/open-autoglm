@@ -9,7 +9,10 @@
     "confirm": "Confirm",
     "deny": "Deny",
     "allow": "Allow",
-    "error_prefix": "Error: "
+    "error_prefix": "Error: ",
+    "create": "Create",
+    "rename": "Rename",
+    "enter_new_name": "Enter new name"
   },
   "sidebar": {
     "devices": "DEVICES",
@@ -58,7 +61,10 @@
     "quality_720p": "720P Medium",
     "quality_480p": "480P Standard",
     "quality_360p": "360P Smooth",
-    "quality_auto": "Auto"
+    "quality_auto": "Auto",
+    "home": "Home",
+    "back": "Back",
+    "recent_apps": "Recent Apps"
   },
   "settings": {
     "title": "Agent Configuration",
@@ -66,7 +72,15 @@
     "base_url": "Model API Base URL",
     "model_name": "Model Name",
     "api_key": "API Key",
-    "local_tip": "Leave as 'EMPTY' for local vLLM"
+    "local_tip": "Leave as 'EMPTY' for local vLLM",
+    "saved": "Settings saved",
+    "select_provider": "Select Provider",
+    "provider_vllm": "vLLM",
+    "provider_ollama": "Ollama",
+    "provider_bailian": "Bailian (Alibaba)",
+    "provider_gemini": "Google Gemini",
+    "provider_claude": "Anthropic Claude",
+    "provider_custom": "Custom"
   },
   "guide": {
     "title": "Connect Your Device",

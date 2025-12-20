@@ -4,16 +4,29 @@
     "cancel": "キャンセル",
     "save": "変更を保存",
     "stop": "停止",
-    "got_it": "了解"
+    "got_it": "了解",
+    "submit": "送信",
+    "confirm": "確認",
+    "deny": "拒否",
+    "allow": "許可",
+    "error_prefix": "エラー：",
+    "create": "作成",
+    "rename": "名前を変更",
+    "enter_new_name": "新しい名前を入力"
   },
   "sidebar": {
     "devices": "デバイス",
     "no_devices": "デバイスが見つかりません",
     "connect_guide_hint": "接続ガイドを表示",
+    "add_device": "新しいデバイスを追加",
     "configuration": "設定",
     "model_settings": "モデル設定",
     "connected": "サーバー接続済み",
-    "disconnected": "切断されました"
+    "disconnected": "切断されました",
+    "offline": "オフライン",
+    "connection_failed": "接続失敗：",
+    "trust_certificate": "ここをクリックして証明書を信頼",
+    "accept_unsafe": "（「安全でないサイトに進む」を受け入れる）"
   },
   "topbar": {
     "current_session": "現在のセッション",
@@ -28,11 +41,30 @@
     "select_device_placeholder": "← デバイスを選択してください",
     "reasoning_chain": "推論チェーン",
     "action_executed": "実行されたアクション",
-    "error_start_task": "タスクの開始に失敗しました"
+    "error_start_task": "タスクの開始に失敗しました",
+    "step_1": "ステップ 1",
+    "step_2": "ステップ 2",
+    "generating_session": "セッション生成中...",
+    "fps": "FPS",
+    "harmony_os_tip": "HarmonyOS: HDC ツールを使用",
+    "ios_tip": "iOS: WDA が必要",
+    "input_submitted": "入力が送信されました",
+    "selected": "選択済み：",
+    "confirmation_required": "確認が必要です",
+    "input_required": "入力が必要です",
+    "enter_value": "値を入力..."
   },
   "mirror": {
     "title": "デバイスミラー",
-    "waiting_signal": "信号待機中"
+    "waiting_signal": "信号待機中",
+    "quality_1080p": "1080P 高画質",
+    "quality_720p": "720P 中画質",
+    "quality_480p": "480P 標準",
+    "quality_360p": "360P スムーズ",
+    "quality_auto": "自動",
+    "home": "ホーム",
+    "back": "戻る",
+    "recent_apps": "最近のアプリ"
   },
   "settings": {
     "title": "エージェント設定",
@@ -40,7 +72,15 @@
     "base_url": "モデル API URL",
     "model_name": "モデル名",
     "api_key": "API キー",
-    "local_tip": "ローカル vLLM の場合は 'EMPTY' のままにしてください"
+    "local_tip": "ローカル vLLM の場合は 'EMPTY' のままにしてください",
+    "saved": "設定が保存されました",
+    "select_provider": "プロバイダーを選択",
+    "provider_vllm": "vLLM",
+    "provider_ollama": "Ollama",
+    "provider_bailian": "通義千問 (アリババ)",
+    "provider_gemini": "Google Gemini",
+    "provider_claude": "Anthropic Claude",
+    "provider_custom": "カスタム"
   },
   "guide": {
     "title": "デバイスを接続",
@@ -74,7 +114,7 @@
     "type_wifi": "WiFi 接続",
     "type_webrtc": "WebRTC 接続",
     "step_webrtc": "WebRTC 設定",
-    "webrtc_desc": "シグナリング URL 経由でリモートデバイスに接続します。",
+    "webrtc_desc": "AutoGLM アプリを使用してこの QR コードをスキャンしてください。",
     "webrtc_placeholder": "wss://remote-device.com/socket",
     "btn_connect_webrtc": "ストリームに接続",
     "usb_instr_1": "USB ケーブルでデバイスをコンピュータに接続してください。",
@@ -89,6 +129,83 @@
     "wifi_ip_desc": "デバイスの IP アドレスを入力してください (例: 192.168.1.5)。",
     "wifi_ip_placeholder": "192.168.1.x",
     "connecting": "接続中...",
-    "success": "接続に成功しました！"
+    "success": "接続に成功しました！",
+    "scan_to_connect": "スキャンして接続",
+    "waiting_device": "デバイス接続を待機中..."
+  },
+  "task": {
+    "task": "タスク",
+    "session": "セッション",
+    "select_session": "セッションを選択",
+    "sessions_local": "セッション (ローカル)",
+    "no_sessions": "セッションなし",
+    "background_tasks_remote": "バックグラウンドタスク (リモート)",
+    "no_tasks": "タスクなし",
+    "new_task_title": "新しいセッション / タスク",
+    "type": "タイプ",
+    "name": "名前",
+    "name_placeholder": "例: セッション 1",
+    "role": "役割 (システムプロンプト)",
+    "role_placeholder": "あなたは監視エージェントです...",
+    "details": "タスクの詳細",
+    "details_placeholder": "バッテリーレベルを監視し、20% 未満の場合に通知します..."
+  },
+  "permissions": {
+    "title": "機密操作の権限",
+    "description": "機密操作の自動実行を有効または無効にします。無効にした操作は手動確認が必要です。",
+    "install_app": "アプリをインストール",
+    "payment": "支払い操作",
+    "reply_wechat": "WeChat に返信",
+    "send_sms": "SMS を送信",
+    "make_call": "電話をかける"
+  },
+  "input": {
+    "upload_image": "画像をアップロード",
+    "select_app": "アプリを選択",
+    "apps": "アプリ",
+    "support_tag": "サポート"
+  },
+  "error": {
+    "cannot_select_offline": "オフラインデバイスを選択できません",
+    "failed_remove_device": "デバイスの削除に失敗しました",
+    "failed_delete_task": "タスクの削除に失敗しました",
+    "failed_rename_task": "タスクの名前変更に失敗しました",
+    "failed_enable_wifi": "WiFi モードの有効化に失敗しました",
+    "connection_failed": "接続失敗",
+    "failed_init_webrtc": "WebRTC セッションの初期化に失敗しました",
+    "connection_blocked": "接続がブロックまたは失敗しました",
+    "failed_save_permissions": "権限の保存に失敗しました",
+    "failed_connect_backend": "バックエンドへの接続に失敗しました",
+    "failed_select_device": "デバイスの選択に失敗しました",
+    "failed_fetch_tasks": "タスクの取得に失敗しました",
+    "failed_create_task": "タスクの作成に失敗しました",
+    "failed_load_messages": "メッセージの読み込みに失敗しました",
+    "failed_fetch_apps": "デバイスアプリの取得に失敗しました",
+    "failed_send_interaction": "インタラクション応答の送信に失敗しました",
+    "failed_start_task": "タスクの開始に失敗しました"
+  },
+  "success": {
+    "device_removed": "デバイスが削除されました",
+    "session_deleted": "セッションが削除されました",
+    "task_deleted": "タスクが削除されました",
+    "renamed": "名前が正常に変更されました",
+    "wifi_enabled": "WiFi モードが有効になりました",
+    "connected_wifi": "WiFi 経由で接続されました",
+    "webrtc_connected": "WebRTC デバイスが接続されました！",
+    "config_saved": "設定が保存されました",
+    "quality_set": "品質が {quality} に設定されました",
+    "task_stopped": "タスクが停止されました"
+  },
+  "debug": {
+    "session_prefix": "セッション ",
+    "new_task": "新しいタスク",
+    "chat_sync": "チャット同期",
+    "disconnected_code": "切断されました (コード: {code})",
+    "device_locked": "デバイスがロックされています。待機中...",
+    "frame_load_failed": "フレーム画像の読み込みに失敗しました",
+    "permission_request": "権限リクエスト",
+    "install_app_request": "エージェントがアプリケーションをインストールする必要があります。これを許可しますか？",
+    "sms_verification": "SMS 認証",
+    "enter_verification_code": "受信した認証コードを入力してください。"
   }
 }

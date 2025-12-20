@@ -355,7 +355,7 @@
                     <div v-if="msg.type === 'confirm'" class="mt-2 w-full max-w-sm bg-[#1c2128] border border-blue-500/30 rounded-xl overflow-hidden shadow-lg animate-fade-in">
                         <div class="px-4 py-3 border-b border-gray-700/50 bg-blue-900/10 flex items-center gap-2">
                             <el-icon class="text-blue-400"><QuestionFilled /></el-icon>
-                            <span class="text-xs font-bold text-blue-100">{{ msg.title || 'Confirmation Required' }}</span>
+                            <span class="text-xs font-bold text-blue-100">{{ msg.title || t('chat.confirmation_required') }}</span>
                         </div>
                         <div class="p-4 space-y-4">
                             <p class="text-sm text-gray-300">{{ msg.content }}</p>
@@ -380,13 +380,13 @@
                     <div v-if="msg.type === 'input'" class="mt-2 w-full max-w-sm bg-[#1c2128] border border-amber-500/30 rounded-xl overflow-hidden shadow-lg animate-fade-in">
                         <div class="px-4 py-3 border-b border-gray-700/50 bg-amber-900/10 flex items-center gap-2">
                             <el-icon class="text-amber-400"><EditPen /></el-icon>
-                            <span class="text-xs font-bold text-amber-100">{{ msg.title || 'Input Required' }}</span>
+                            <span class="text-xs font-bold text-amber-100">{{ msg.title || t('chat.input_required') }}</span>
                         </div>
                         <div class="p-4 space-y-3">
                             <p class="text-sm text-gray-300">{{ msg.content }}</p>
                             <div v-if="!msg.submitted" class="flex gap-2">
-                                <el-input v-model="msg.inputValue" :placeholder="msg.placeholder || 'Enter value...'" size="small" @keyup.enter="handleCardInput(msg)" />
-                                <el-button type="primary" size="small" @click="handleCardInput(msg)">Submit</el-button>
+                                <el-input v-model="msg.inputValue" :placeholder="msg.placeholder || t('chat.enter_value')" size="small" @keyup.enter="handleCardInput(msg)" />
+                                <el-button type="primary" size="small" @click="handleCardInput(msg)">{{ t('common.submit') }}</el-button>
                             </div>
                              <div v-else class="text-xs text-gray-500 italic flex items-center justify-end gap-1">
                                 <el-icon><Check /></el-icon> {{ t('chat.input_submitted') }}
@@ -1488,11 +1488,11 @@ const sendMessage = async () => {
       const msg: any = {
           role: 'agent',
           type: 'confirm',
-          title: 'Permission Request',
-          content: 'The agent needs to install an application. Do you allow this?',
+          title: t('debug.permission_request'),
+          content: t('debug.install_app_request'),
           options: [
-              { label: 'Deny', value: 'No', type: 'danger' },
-              { label: 'Allow', value: 'Yes', type: 'success' }
+              { label: t('common.deny'), value: 'No', type: 'danger' },
+              { label: t('common.allow'), value: 'Yes', type: 'success' }
           ],
           sessionId: activeTaskId.value,
           submitted: false
@@ -1507,8 +1507,8 @@ const sendMessage = async () => {
       const msg: any = {
           role: 'agent',
           type: 'input',
-          title: 'SMS Verification',
-          content: 'Please enter the verification code you received.',
+          title: t('debug.sms_verification'),
+          content: t('debug.enter_verification_code'),
           placeholder: '123456',
           sessionId: activeTaskId.value,
           submitted: false

@@ -1,19 +1,32 @@
 {
   "common": {
-    "loading": "ロディン...",
+    "loading": "로딩 중...",
     "cancel": "취소",
     "save": "변경 사항 저장",
     "stop": "중지",
-    "got_it": "확인"
+    "got_it": "확인",
+    "submit": "제출",
+    "confirm": "확인",
+    "deny": "거부",
+    "allow": "허용",
+    "error_prefix": "오류: ",
+    "create": "생성",
+    "rename": "이름 변경",
+    "enter_new_name": "새 이름 입력"
   },
   "sidebar": {
     "devices": "장치 목록",
     "no_devices": "장치가 감지되지 않음",
     "connect_guide_hint": "연결 가이드 보기",
+    "add_device": "새 장치 추가",
     "configuration": "설정",
     "model_settings": "모델 설정",
     "connected": "서버에 연결됨",
-    "disconnected": "연결 끊김"
+    "disconnected": "연결 끊김",
+    "offline": "오프라인",
+    "connection_failed": "연결 실패: ",
+    "trust_certificate": "여기를 클릭하여 인증서 신뢰",
+    "accept_unsafe": "('안전하지 않은 사이트로 진행' 수락)"
   },
   "topbar": {
     "current_session": "현재 세션",
@@ -28,11 +41,30 @@
     "select_device_placeholder": "← 장치를 먼저 선택하세요",
     "reasoning_chain": "추론 체인",
     "action_executed": "실행된 작업",
-    "error_start_task": "작업 시작 실패"
+    "error_start_task": "작업 시작 실패",
+    "step_1": "1단계",
+    "step_2": "2단계",
+    "generating_session": "세션 생성 중...",
+    "fps": "FPS",
+    "harmony_os_tip": "HarmonyOS: HDC 도구 사용",
+    "ios_tip": "iOS: WDA 필요",
+    "input_submitted": "입력이 제출되었습니다",
+    "selected": "선택됨: ",
+    "confirmation_required": "확인이 필요합니다",
+    "input_required": "입력이 필요합니다",
+    "enter_value": "값 입력..."
   },
   "mirror": {
     "title": "장치 미러링",
-    "waiting_signal": "신호 대기 중"
+    "waiting_signal": "신호 대기 중",
+    "quality_1080p": "1080P 고화질",
+    "quality_720p": "720P 중화질",
+    "quality_480p": "480P 표준",
+    "quality_360p": "360P 부드러움",
+    "quality_auto": "자동",
+    "home": "홈",
+    "back": "뒤로",
+    "recent_apps": "최근 앱"
   },
   "settings": {
     "title": "에이전트 설정",
@@ -40,7 +72,15 @@
     "base_url": "모델 API URL",
     "model_name": "모델 이름",
     "api_key": "API 키",
-    "local_tip": "로컬 vLLM의 경우 'EMPTY'로 두세요"
+    "local_tip": "로컬 vLLM의 경우 'EMPTY'로 두세요",
+    "saved": "설정이 저장되었습니다",
+    "select_provider": "공급자 선택",
+    "provider_vllm": "vLLM",
+    "provider_ollama": "Ollama",
+    "provider_bailian": "通義千問 (알리바바)",
+    "provider_gemini": "Google Gemini",
+    "provider_claude": "Anthropic Claude",
+    "provider_custom": "사용자 정의"
   },
   "guide": {
     "title": "장치 연결",
@@ -74,7 +114,7 @@
     "type_wifi": "WiFi 연결",
     "type_webrtc": "WebRTC 연결",
     "step_webrtc": "WebRTC 설정",
-    "webrtc_desc": "시그널링 URL을 통해 원격 장치에 연결합니다.",
+    "webrtc_desc": "AutoGLM 앱을 사용하여 이 QR 코드를 스캔하세요.",
     "webrtc_placeholder": "wss://remote-device.com/socket",
     "btn_connect_webrtc": "스트림 연결",
     "usb_instr_1": "USB 케이블을 통해 장치를 컴퓨터에 연결하십시오.",
@@ -89,6 +129,83 @@
     "wifi_ip_desc": "장치 IP 주소를 입력하십시오 (예: 192.168.1.5).",
     "wifi_ip_placeholder": "192.168.1.x",
     "connecting": "연결 중...",
-    "success": "연결되었습니다!"
+    "success": "연결되었습니다!",
+    "scan_to_connect": "스캔하여 연결",
+    "waiting_device": "장치 연결 대기 중..."
+  },
+  "task": {
+    "task": "작업",
+    "session": "세션",
+    "select_session": "세션 선택",
+    "sessions_local": "세션 (로컬)",
+    "no_sessions": "세션 없음",
+    "background_tasks_remote": "백그라운드 작업 (원격)",
+    "no_tasks": "작업 없음",
+    "new_task_title": "새 세션 / 작업",
+    "type": "유형",
+    "name": "이름",
+    "name_placeholder": "예: 세션 1",
+    "role": "역할 (시스템 프롬프트)",
+    "role_placeholder": "당신은 모니터링 에이전트입니다...",
+    "details": "작업 세부 정보",
+    "details_placeholder": "배터리 수준을 모니터링하고 20% 미만일 때 알림..."
+  },
+  "permissions": {
+    "title": "민감한 작업 권한",
+    "description": "민감한 작업의 자동 실행을 활성화하거나 비활성화합니다. 비활성화된 작업은 수동 확인이 필요합니다.",
+    "install_app": "앱 설치",
+    "payment": "결제 작업",
+    "reply_wechat": "WeChat 답장",
+    "send_sms": "SMS 보내기",
+    "make_call": "전화 걸기"
+  },
+  "input": {
+    "upload_image": "이미지 업로드",
+    "select_app": "앱 선택",
+    "apps": "앱",
+    "support_tag": "지원"
+  },
+  "error": {
+    "cannot_select_offline": "오프라인 장치를 선택할 수 없습니다",
+    "failed_remove_device": "장치 제거 실패",
+    "failed_delete_task": "작업 삭제 실패",
+    "failed_rename_task": "작업 이름 변경 실패",
+    "failed_enable_wifi": "WiFi 모드 활성화 실패",
+    "connection_failed": "연결 실패",
+    "failed_init_webrtc": "WebRTC 세션 초기화 실패",
+    "connection_blocked": "연결이 차단되었거나 실패했습니다",
+    "failed_save_permissions": "권한 저장 실패",
+    "failed_connect_backend": "백엔드 연결 실패",
+    "failed_select_device": "장치 선택 실패",
+    "failed_fetch_tasks": "작업 가져오기 실패",
+    "failed_create_task": "작업 생성 실패",
+    "failed_load_messages": "메시지 로드 실패",
+    "failed_fetch_apps": "장치 앱 가져오기 실패",
+    "failed_send_interaction": "상호작용 응답 전송 실패",
+    "failed_start_task": "작업 시작 실패"
+  },
+  "success": {
+    "device_removed": "장치가 제거되었습니다",
+    "session_deleted": "세션이 삭제되었습니다",
+    "task_deleted": "작업이 삭제되었습니다",
+    "renamed": "이름이 성공적으로 변경되었습니다",
+    "wifi_enabled": "WiFi 모드가 활성화되었습니다",
+    "connected_wifi": "WiFi를 통해 연결되었습니다",
+    "webrtc_connected": "WebRTC 장치가 연결되었습니다!",
+    "config_saved": "설정이 저장되었습니다",
+    "quality_set": "품질이 {quality}로 설정되었습니다",
+    "task_stopped": "작업이 중지되었습니다"
+  },
+  "debug": {
+    "session_prefix": "세션 ",
+    "new_task": "새 작업",
+    "chat_sync": "채팅 동기화",
+    "disconnected_code": "연결 끊김 (코드: {code})",
+    "device_locked": "장치가 잠겨 있습니다. 대기 중...",
+    "frame_load_failed": "프레임 이미지 로드 실패",
+    "permission_request": "권한 요청",
+    "install_app_request": "에이전트가 애플리케이션을 설치해야 합니다. 이를 허용하시겠습니까?",
+    "sms_verification": "SMS 인증",
+    "enter_verification_code": "받은 인증 코드를 입력하세요."
   }
 }
