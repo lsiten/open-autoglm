@@ -16,12 +16,12 @@
 
         <!-- Connection Error Banner -->
         <div v-if="!wsConnected && !loadingDevices" class="bg-red-900/20 border-b border-red-900/50 p-2 text-center">
-            <p class="text-[10px] text-red-300 mb-1">Connection Failed: {{ wsBaseUrl }}</p>
+            <p class="text-[10px] text-red-300 mb-1">{{ t('sidebar.connection_failed') }} {{ wsBaseUrl }}</p>
             <p v-if="wsError" class="text-[9px] text-red-400 mb-1 font-mono break-all">{{ wsError }}</p>
             <a :href="`${backendRootUrl}/docs`" target="_blank" class="text-[10px] text-blue-400 underline hover:text-blue-300 block">
-                Click here to Trust Certificate
+                {{ t('sidebar.trust_certificate') }}
             </a>
-            <span class="text-[9px] text-gray-500 block mt-1">(Accept 'Proceed to unsafe')</span>
+            <span class="text-[9px] text-gray-500 block mt-1">{{ t('sidebar.accept_unsafe') }}</span>
         </div>
 
         <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -97,7 +97,7 @@
               <div class="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
                  <span class="px-1.5 py-0.5 rounded bg-gray-700/50">{{ dev.type.toUpperCase() }}</span>
                  <span>{{ dev.connection_type }}</span>
-                 <span v-if="dev.status === 'offline'" class="text-red-400 italic">Offline</span>
+                 <span v-if="dev.status === 'offline'" class="text-red-400 italic">{{ t('sidebar.offline') || 'Offline' }}</span>
               </div>
             </div>
           </div>
@@ -142,11 +142,11 @@
                     </div>
                     <div class="flex flex-col min-w-0">
                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                         {{ activeTask?.type === 'background' ? 'Task' : 'Session' }}
+                         {{ activeTask?.type === 'background' ? t('task.task') : t('task.session') }}
                          <span v-if="agentStatus === 'running'" class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                        </span>
                        <span class="text-sm font-medium text-white flex items-center gap-2 truncate max-w-[150px]">
-                         {{ activeTask?.name || 'Select Session' }}
+                         {{ activeTask?.name || t('task.select_session') }}
                          <el-icon class="text-gray-500 text-xs shrink-0"><ArrowDown /></el-icon>
                        </span>
                     </div>
@@ -155,7 +155,7 @@
                     <el-dropdown-menu class="min-w-[280px] p-2 custom-dropdown">
                         <!-- Sessions (IndexedDB) -->
                         <div class="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase flex justify-between items-center bg-gray-50/5 rounded mb-1">
-                            <span>Sessions (Local)</span>
+                            <span>{{ t('task.sessions_local') }}</span>
                             <el-button link type="primary" size="small" @click.stop="openCreateTaskDialog('chat')"><el-icon><Plus /></el-icon></el-button>
                         </div>
                         
@@ -176,13 +176,13 @@
                                 <el-icon class="is-loading"><Loading /></el-icon>
                             </div>
                         </div>
-                        <div v-if="sessions.length === 0" class="px-4 py-2 text-xs text-gray-500 italic">No sessions</div>
+                        <div v-if="sessions.length === 0" class="px-4 py-2 text-xs text-gray-500 italic">{{ t('task.no_sessions') }}</div>
 
                         <div class="border-t border-gray-700/50 my-2"></div>
 
                         <!-- Tasks (Backend) -->
                         <div class="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase flex justify-between items-center bg-gray-50/5 rounded mb-1">
-                            <span>Background Tasks (Remote)</span>
+                            <span>{{ t('task.background_tasks_remote') }}</span>
                             <el-button link type="primary" size="small" @click.stop="openCreateTaskDialog('background')"><el-icon><Plus /></el-icon></el-button>
                         </div>
                         <el-dropdown-item v-for="t in backgroundTasks" :key="t.id" :command="t" :class="{'!text-blue-400 !bg-blue-900/10': activeTaskId === t.id}">
@@ -198,7 +198,7 @@
                                 </div>
                             </div>
                         </el-dropdown-item>
-                         <div v-if="backgroundTasks.length === 0" class="px-4 py-2 text-xs text-gray-500 italic">No tasks</div>
+                         <div v-if="backgroundTasks.length === 0" class="px-4 py-2 text-xs text-gray-500 italic">{{ t('task.no_tasks') }}</div>
                     </el-dropdown-menu>
                 </template>
             </el-dropdown>
@@ -206,7 +206,7 @@
 
           <div class="flex items-center gap-3">
              <!-- Permissions Button (Moved to Top Bar) -->
-             <el-tooltip content="Sensitive Actions Permissions" placement="bottom">
+             <el-tooltip :content="t('permissions.title')" placement="bottom">
                 <el-button v-if="activeDeviceId" circle class="!bg-gray-800 !border-gray-700 hover:!bg-gray-700 hover:!text-white" @click="openPermissions">
                     <el-icon><Lock /></el-icon>
                 </el-button>
@@ -284,8 +284,8 @@
 
                 <div class="mt-8 pt-6 border-t border-gray-800 flex justify-between items-center text-xs text-gray-500">
                    <div class="flex gap-4">
-                      <span>• HarmonyOS: Use HDC tool</span>
-                      <span>• iOS: Requires WDA</span>
+                      <span>• {{ t('chat.harmony_os_tip') }}</span>
+                      <span>• {{ t('chat.ios_tip') }}</span>
                    </div>
                    <el-button link type="primary" size="small" @click="fetchDevices">
                       <el-icon class="mr-1"><Refresh /></el-icon> {{ t('guide.refresh_list') }}
@@ -327,7 +327,7 @@
                        <div class="bg-[#1c2128] border border-gray-700/50 rounded-xl overflow-hidden">
                           <div class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center gap-2">
                              <el-icon class="text-amber-500" :class="{ 'is-loading': msg.isThinking }"><Loading v-if="msg.isThinking" /><Cpu v-else /></el-icon>
-                             <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">Reasoning Chain</span>
+                             <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.reasoning_chain') }}</span>
                           </div>
                           <div class="p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-5 bg-[#0d1117] max-h-64 overflow-y-auto custom-scrollbar">
                              {{ msg.thought }}
@@ -371,7 +371,7 @@
                                 </el-button>
                             </div>
                             <div v-else class="text-xs text-gray-500 text-right italic flex items-center justify-end gap-1">
-                                <el-icon><Check /></el-icon> Selected: {{ msg.selectedValue }}
+                                <el-icon><Check /></el-icon> {{ t('chat.selected') }} {{ msg.selectedValue }}
                             </div>
                         </div>
                     </div>
@@ -389,7 +389,7 @@
                                 <el-button type="primary" size="small" @click="handleCardInput(msg)">Submit</el-button>
                             </div>
                              <div v-else class="text-xs text-gray-500 italic flex items-center justify-end gap-1">
-                                <el-icon><Check /></el-icon> Input Submitted
+                                <el-icon><Check /></el-icon> {{ t('chat.input_submitted') }}
                             </div>
                         </div>
                     </div>
@@ -421,11 +421,11 @@
                  
                  <!-- Toolbar -->
                  <div v-if="activeDeviceId" class="flex items-center gap-4 px-1">
-                    <el-tooltip content="Upload Image" placement="top">
+                    <el-tooltip :content="t('input.upload_image')" placement="top">
                         <button @click="triggerUpload('image')" class="text-gray-500 hover:text-blue-400 transition-colors"><el-icon :size="20"><Picture /></el-icon></button>
                     </el-tooltip>
                     <!-- ... other toolbar items ... -->
-                    <el-tooltip content="Select App" placement="top">
+                    <el-tooltip :content="t('input.select_app')" placement="top">
                         <button @click="triggerAppSelect" class="text-gray-500 hover:text-green-400 transition-colors"><el-icon :size="20"><Grid /></el-icon></button>
                     </el-tooltip>
                     <input type="file" ref="fileInput" class="hidden" @change="handleFileSelect" />
@@ -435,7 +435,7 @@
              <!-- App Suggestions Popover (Unchanged) -->
              <div v-if="showAppSuggestions" class="absolute bottom-full left-0 mb-2 bg-[#161b22] border border-gray-700 rounded-lg shadow-xl max-h-64 overflow-y-auto w-72 z-50 custom-scrollbar animate-fade-in">
                  <div class="px-3 py-1.5 text-[10px] text-gray-500 font-bold uppercase tracking-wider border-b border-gray-700/50 flex justify-between">
-                    <span>Apps</span>
+                    <span>{{ t('input.apps') }}</span>
                     <span class="text-[9px] bg-gray-800 px-1 rounded">{{ availableApps.length }}</span>
                  </div>
                  <div v-for="app in availableApps.filter(a => a.name.toLowerCase().includes(appSuggestionQuery))" :key="app.name" 
@@ -446,7 +446,7 @@
                         <span class="truncate font-medium">{{ app.name }}</span>
                         <span v-if="app.package" class="text-[10px] text-gray-500 truncate font-mono">{{ app.package }}</span>
                       </div>
-                      <el-tag v-if="app.type === 'supported'" size="small" type="success" effect="plain" class="scale-75 origin-right">Support</el-tag>
+                      <el-tag v-if="app.type === 'supported'" size="small" type="success" effect="plain" class="scale-75 origin-right">{{ t('input.support_tag') }}</el-tag>
                  </div>
              </div>
 
@@ -481,18 +481,18 @@
              <!-- Stream Quality Selector -->
              <el-dropdown @command="updateStreamQuality" trigger="click">
                 <span class="el-dropdown-link text-[10px] font-mono text-gray-400 hover:text-white cursor-pointer bg-gray-800 border border-gray-700 px-2 py-0.5 rounded flex items-center gap-1">
-                   {{ qualityOptions.find(o => o.key === streamQuality)?.label || streamQuality.toUpperCase() }}
+                   {{ t('mirror.quality_' + streamQuality) }}
                    <el-icon><ArrowDown /></el-icon>
                 </span>
                 <template #dropdown>
                    <el-dropdown-menu class="custom-dropdown">
                       <el-dropdown-item v-for="opt in qualityOptions" :key="opt.key" :command="opt.key" :class="{'!text-blue-400': streamQuality === opt.key}">
-                          {{ opt.label }}
+                          {{ t('mirror.quality_' + opt.key) }}
                       </el-dropdown-item>
                    </el-dropdown-menu>
                 </template>
              </el-dropdown>
-             <el-tag size="small" effect="dark" class="!bg-gray-800 !border-gray-700 text-gray-400 font-mono text-[10px]">{{ fps }} FPS</el-tag>
+             <el-tag size="small" effect="dark" class="!bg-gray-800 !border-gray-700 text-gray-400 font-mono text-[10px]">{{ fps }} {{ t('chat.fps') }}</el-tag>
           </div>
        </div>
        
@@ -530,17 +530,17 @@
        
        <!-- Quick Actions Footer -->
        <div class="h-16 border-t border-gray-800 bg-[#0d1117] flex items-center justify-around px-4 shrink-0">
-          <el-tooltip content="Home" placement="top">
+          <el-tooltip :content="t('mirror.home')" placement="top">
             <el-button circle class="!bg-gray-800 !border-gray-700 hover:!bg-gray-700 hover:!text-white" @click="goHome">
               <el-icon><House /></el-icon>
             </el-button>
           </el-tooltip>
-          <el-tooltip content="Back" placement="top">
+          <el-tooltip :content="t('mirror.back')" placement="top">
             <el-button circle class="!bg-gray-800 !border-gray-700 hover:!bg-gray-700 hover:!text-white" @click="goBack">
               <el-icon><Back /></el-icon>
             </el-button>
           </el-tooltip>
-          <el-tooltip content="Recent Apps" placement="top">
+          <el-tooltip :content="t('mirror.recent_apps')" placement="top">
             <el-button circle class="!bg-gray-800 !border-gray-700 hover:!bg-gray-700 hover:!text-white" @click="goRecent">
               <el-icon><Menu /></el-icon>
             </el-button>
@@ -549,48 +549,48 @@
     </div>
 
     <!-- Permissions Dialog -->
-    <el-dialog v-model="showPermissions" title="Sensitive Actions Permission" width="400px" class="dark-dialog permissions-dialog">
+    <el-dialog v-model="showPermissions" :title="t('permissions.title')" width="400px" class="dark-dialog permissions-dialog">
         <div class="space-y-4">
-            <p class="text-xs text-gray-400 mb-4">Enable or disable automatic execution for sensitive actions. Disabled actions will require manual confirmation.</p>
+            <p class="text-xs text-gray-400 mb-4">{{ t('permissions.description') }}</p>
             
             <div class="flex items-center justify-between">
-                <span class="text-sm transition-colors" :class="devicePermissions.install_app ? 'text-black font-medium' : 'text-gray-400'">Install Apps</span>
+                <span class="text-sm transition-colors" :class="devicePermissions.install_app ? 'text-black font-medium' : 'text-gray-400'">{{ t('permissions.install_app') }}</span>
                 <el-switch v-model="devicePermissions.install_app" />
             </div>
             <div class="flex items-center justify-between">
-                <span class="text-sm transition-colors" :class="devicePermissions.payment ? 'text-black font-medium' : 'text-gray-400'">Payment Operations</span>
+                <span class="text-sm transition-colors" :class="devicePermissions.payment ? 'text-black font-medium' : 'text-gray-400'">{{ t('permissions.payment') }}</span>
                 <el-switch v-model="devicePermissions.payment" />
             </div>
             <div class="flex items-center justify-between">
-                <span class="text-sm transition-colors" :class="devicePermissions.wechat_reply ? 'text-black font-medium' : 'text-gray-400'">Reply WeChat</span>
+                <span class="text-sm transition-colors" :class="devicePermissions.wechat_reply ? 'text-black font-medium' : 'text-gray-400'">{{ t('permissions.reply_wechat') }}</span>
                 <el-switch v-model="devicePermissions.wechat_reply" />
             </div>
             <div class="flex items-center justify-between">
-                <span class="text-sm transition-colors" :class="devicePermissions.send_sms ? 'text-black font-medium' : 'text-gray-400'">Send SMS</span>
+                <span class="text-sm transition-colors" :class="devicePermissions.send_sms ? 'text-black font-medium' : 'text-gray-400'">{{ t('permissions.send_sms') }}</span>
                 <el-switch v-model="devicePermissions.send_sms" />
             </div>
             <div class="flex items-center justify-between">
-                <span class="text-sm transition-colors" :class="devicePermissions.make_call ? 'text-black font-medium' : 'text-gray-400'">Make Phone Call</span>
+                <span class="text-sm transition-colors" :class="devicePermissions.make_call ? 'text-black font-medium' : 'text-gray-400'">{{ t('permissions.make_call') }}</span>
                 <el-switch v-model="devicePermissions.make_call" />
             </div>
         </div>
         <template #footer>
             <span class="dialog-footer">
-                <el-button @click="showPermissions = false">Cancel</el-button>
-                <el-button type="primary" @click="savePermissions">Save</el-button>
+                <el-button @click="showPermissions = false">{{ t('common.cancel') }}</el-button>
+                <el-button type="primary" @click="savePermissions">{{ t('common.save') }}</el-button>
             </span>
         </template>
     </el-dialog>
     <el-dialog v-model="showConfig" :title="t('settings.title')" width="500px" class="custom-dialog" align-center>
        <el-form label-position="top" class="mt-2">
          <el-form-item :label="t('settings.provider')">
-           <el-select v-model="selectedProvider" placeholder="Select Provider" @change="updateProviderConfig">
-             <el-option label="Local (vLLM)" value="vllm" />
-             <el-option label="Ollama" value="ollama" />
-             <el-option label="Alibaba Bailian (Qwen)" value="bailian" />
-             <el-option label="Google Gemini (OpenAI Compat)" value="gemini" />
-             <el-option label="Anthropic Claude (Proxy)" value="claude" />
-             <el-option label="Custom" value="custom" />
+           <el-select v-model="selectedProvider" :placeholder="t('settings.select_provider')" @change="updateProviderConfig">
+             <el-option :label="t('settings.provider_vllm')" value="vllm" />
+             <el-option :label="t('settings.provider_ollama')" value="ollama" />
+             <el-option :label="t('settings.provider_bailian')" value="bailian" />
+             <el-option :label="t('settings.provider_gemini')" value="gemini" />
+             <el-option :label="t('settings.provider_claude')" value="claude" />
+             <el-option :label="t('settings.provider_custom')" value="custom" />
            </el-select>
          </el-form-item>
          
@@ -614,41 +614,41 @@
     </el-dialog>
 
     <!-- Create Task Dialog -->
-    <el-dialog v-model="showTaskDialog" title="New Session / Task" width="450px" class="custom-dialog" align-center>
+    <el-dialog v-model="showTaskDialog" :title="t('task.new_task_title')" width="450px" class="custom-dialog" align-center>
        <el-form label-position="top" class="mt-2">
-          <el-form-item label="Type">
+          <el-form-item :label="t('task.type')">
              <el-radio-group v-model="newTask.type" size="small">
-                <el-radio-button label="chat">Session</el-radio-button>
-                <el-radio-button label="background">Background Task</el-radio-button>
+                <el-radio-button label="chat">{{ t('task.session') }}</el-radio-button>
+                <el-radio-button label="background">{{ t('task.task') }}</el-radio-button>
              </el-radio-group>
           </el-form-item>
-          <el-form-item label="Name">
-             <el-input v-model="newTask.name" placeholder="e.g. Session 1" />
+          <el-form-item :label="t('task.name')">
+             <el-input v-model="newTask.name" :placeholder="t('task.name_placeholder')" />
           </el-form-item>
           <template v-if="newTask.type === 'background'">
-              <el-form-item label="Role (System Prompt)">
-                 <el-input v-model="newTask.role" type="textarea" :rows="2" placeholder="You are a monitoring agent..." />
+              <el-form-item :label="t('task.role')">
+                 <el-input v-model="newTask.role" type="textarea" :rows="2" :placeholder="t('task.role_placeholder')" />
               </el-form-item>
-              <el-form-item label="Task Details">
-                 <el-input v-model="newTask.details" type="textarea" :rows="3" placeholder="Monitor the battery level and notify me if below 20%..." />
+              <el-form-item :label="t('task.details')">
+                 <el-input v-model="newTask.details" type="textarea" :rows="3" :placeholder="t('task.details_placeholder')" />
               </el-form-item>
           </template>
        </el-form>
        <template #footer>
           <div class="flex justify-end gap-2">
-            <el-button @click="showTaskDialog = false" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">Cancel</el-button>
-            <el-button type="primary" @click="createTask" class="!bg-blue-600 !border-none">Create</el-button>
+            <el-button @click="showTaskDialog = false" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" @click="createTask" class="!bg-blue-600 !border-none">{{ t('common.create') }}</el-button>
           </div>
        </template>
     </el-dialog>
     
     <!-- Edit Task Name Dialog -->
-    <el-dialog v-model="showEditTaskDialog" title="Rename" width="400px" class="custom-dialog" align-center>
-        <el-input v-model="editTaskNameValue" placeholder="Enter new name" @keyup.enter="saveTaskName" />
+    <el-dialog v-model="showEditTaskDialog" :title="t('common.rename')" width="400px" class="custom-dialog" align-center>
+        <el-input v-model="editTaskNameValue" :placeholder="t('common.enter_new_name')" @keyup.enter="saveTaskName" />
         <template #footer>
             <div class="flex justify-end gap-2">
-                <el-button @click="showEditTaskDialog = false" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">Cancel</el-button>
-                <el-button type="primary" @click="saveTaskName" class="!bg-blue-600 !border-none">Save</el-button>
+                <el-button @click="showEditTaskDialog = false" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">{{ t('common.cancel') }}</el-button>
+                <el-button type="primary" @click="saveTaskName" class="!bg-blue-600 !border-none">{{ t('common.save') }}</el-button>
             </div>
         </template>
     </el-dialog>
@@ -706,7 +706,7 @@
              <div class="border border-gray-700 rounded-lg p-4 bg-[#0d1117]">
                 <div class="flex items-center justify-between mb-2">
                    <h4 class="font-bold text-gray-200 text-sm">{{ t('wizard.wifi_mode_title') }}</h4>
-                   <el-tag size="small" type="info">Step 1</el-tag>
+                   <el-tag size="small" type="info">{{ t('chat.step_1') }}</el-tag>
                 </div>
                 <p class="text-xs text-gray-500 mb-3">{{ t('wizard.wifi_mode_desc') }}</p>
                 <el-button size="small" :loading="enablingWifi" @click="enableWifiMode">
@@ -716,7 +716,7 @@
              <div class="border border-gray-700 rounded-lg p-4 bg-[#0d1117]">
                 <div class="flex items-center justify-between mb-2">
                    <h4 class="font-bold text-gray-200 text-sm">{{ t('wizard.wifi_ip_title') }}</h4>
-                   <el-tag size="small" type="success">Step 2</el-tag>
+                   <el-tag size="small" type="success">{{ t('chat.step_2') }}</el-tag>
                 </div>
                 <p class="text-xs text-gray-500 mb-3">{{ t('wizard.wifi_ip_desc') }}</p>
                 <div class="flex gap-2">
@@ -733,14 +733,14 @@
              <div class="border border-gray-700 rounded-lg p-6 bg-[#0d1117] flex flex-col items-center gap-4">
                 <div v-if="!webrtcUrl" class="text-center">
                    <el-icon class="is-loading text-blue-500 text-2xl mb-2"><Loading /></el-icon>
-                   <p class="text-xs text-gray-500">Generating Session...</p>
+                   <p class="text-xs text-gray-500">{{ t('chat.generating_session') }}</p>
                 </div>
                 <template v-else>
                    <div class="bg-white p-2 rounded-lg">
                       <qrcode-vue :value="webrtcUrl" :size="200" level="H" />
                    </div>
                    <div class="text-center">
-                      <p class="text-sm font-bold text-gray-200 mb-1">Scan to Connect</p>
+                      <p class="text-sm font-bold text-gray-200 mb-1">{{ t('wizard.scan_to_connect') }}</p>
                       <p class="text-xs text-gray-500 max-w-xs mx-auto mb-2">{{ t('wizard.webrtc_desc') }}</p>
                       <div class="bg-gray-800 p-2 rounded text-[10px] text-gray-400 font-mono break-all select-all">
                          {{ webrtcUrl }}
@@ -748,7 +748,7 @@
                    </div>
                    <div class="flex items-center gap-2 text-xs text-blue-400 animate-pulse">
                       <el-icon><Connection /></el-icon>
-                      <span>Waiting for device connection...</span>
+                      <span>{{ t('wizard.waiting_device') }}</span>
                    </div>
                 </template>
              </div>
@@ -848,7 +848,7 @@ const savePermissions = async () => {
         ElMessage.success(t('settings.saved'))
     } catch (e) {
         console.error('Failed to save permissions', e)
-        ElMessage.error('Failed to save permissions')
+        ElMessage.error(t('error.failed_save_permissions'))
     }
 }
 const showConnectionGuide = ref(false)
@@ -865,11 +865,11 @@ const isFetchingFrame = ref(false)
 const isStreaming = ref(false)
 
 const qualityOptions = [
-    { key: '1080p', label: '1080P 高清' },
-    { key: '720p', label: '720P 准高清' },
-    { key: '480p', label: '480P 标清' },
-    { key: '360p', label: '360P 流畅' },
-    { key: 'auto', label: '自动' }
+    { key: '1080p' },
+    { key: '720p' },
+    { key: '480p' },
+    { key: '360p' },
+    { key: 'auto' }
 ]
 
 // ... Interaction State ...---
@@ -1015,7 +1015,7 @@ const fetchDevices = async () => {
        activeDeviceId.value = ''
     }
   } catch (err) {
-    ElMessage.error('Failed to connect to backend')
+    ElMessage.error(t('error.failed_connect_backend'))
   } finally {
     loadingDevices.value = false
   }
@@ -1023,14 +1023,14 @@ const fetchDevices = async () => {
 
 const selectDevice = async (device: any) => {
   if (device.status === 'offline') {
-      ElMessage.warning('Cannot select offline device')
+      ElMessage.warning(t('error.cannot_select_offline'))
       return
   }
   try {
     await api.post('/devices/select', { device_id: device.id, type: device.type })
     activeDeviceId.value = device.id
   } catch (err) {
-    ElMessage.error('Failed to select device')
+    ElMessage.error(t('error.failed_select_device'))
   }
 }
 
@@ -1041,9 +1041,9 @@ const deleteDevice = async (device: any) => {
         if (activeDeviceId.value === device.id) {
             activeDeviceId.value = ''
         }
-        ElMessage.success('Device removed')
+        ElMessage.success(t('success.device_removed'))
     } catch (err) {
-        ElMessage.error('Failed to remove device')
+        ElMessage.error(t('error.failed_remove_device'))
     }
 }
 
@@ -1088,6 +1088,7 @@ const fetchData = async () => {
     } catch (e) {
         console.error('Failed to fetch tasks', e)
         backgroundTasks.value = []
+        // Optional: ElMessage.error(t('error.failed_fetch_tasks'))
     }
 
     // Auto-select logic
@@ -1117,7 +1118,7 @@ const createDefaultSession = async () => {
     const id = uuidv4()
     const session = {
         id,
-        name: `Session ${sessions.value.length + 1}`,
+        name: `${t('debug.session_prefix')}${sessions.value.length + 1}`,
         type: 'chat',
         deviceId: activeDeviceId.value,
         createdAt: Date.now()
@@ -1128,7 +1129,7 @@ const createDefaultSession = async () => {
 }
 
 const openCreateTaskDialog = (type = 'chat') => {
-    newTask.value = { type, name: type === 'chat' ? `Session ${sessions.value.length + 1}` : 'New Task', role: '', details: '' }
+    newTask.value = { type, name: type === 'chat' ? `${t('debug.session_prefix')}${sessions.value.length + 1}` : t('debug.new_task'), role: '', details: '' }
     showTaskDialog.value = true
 }
 
@@ -1164,7 +1165,7 @@ const createTask = async () => {
             await api.post(`/tasks/${res.data.task.id}/start`)
             fetchData()
         } catch (e: any) {
-            ElMessage.error(e.response?.data?.detail || 'Failed to create task')
+            ElMessage.error(e.response?.data?.detail || t('error.failed_create_task'))
         }
     }
 }
@@ -1207,6 +1208,7 @@ const loadMessages = async (sessionId: string, beforeId?: number) => {
         }
     } catch (e) {
         console.error('Failed to load messages', e)
+        // ElMessage.error(t('error.failed_load_messages'))
     }
 }
 
@@ -1272,7 +1274,7 @@ const convertLogsToChat = (logs: any[]) => {
                  lastMsg = null
              }
         } else if (log.level === 'error') {
-             history.push({ role: 'agent', content: `Error: ${log.message}` })
+             history.push({ role: 'agent', content: `${t('common.error_prefix')}${log.message}` })
              lastMsg = null
         }
     }
@@ -1287,7 +1289,7 @@ const deleteTask = async (task: any) => {
             activeTaskId.value = null
             chatHistory.value = []
         }
-        ElMessage.success('Session deleted')
+        ElMessage.success(t('success.session_deleted'))
     } else {
         try {
             await api.delete(`/tasks/${task.id}`)
@@ -1296,9 +1298,9 @@ const deleteTask = async (task: any) => {
                 activeTaskId.value = null
                 chatHistory.value = []
             }
-            ElMessage.success('Task deleted')
+            ElMessage.success(t('success.task_deleted'))
         } catch (e) {
-            ElMessage.error('Failed to delete task')
+            ElMessage.error(t('error.failed_delete_task'))
         }
     }
 }
@@ -1322,11 +1324,11 @@ const saveTaskName = async () => {
             await api.put(`/tasks/${taskToEdit.value.id}`, { name: newName })
             taskToEdit.value.name = newName
         } catch (e) {
-            ElMessage.error('Failed to rename task')
+            ElMessage.error(t('error.failed_rename_task'))
         }
     }
     showEditTaskDialog.value = false
-    ElMessage.success('Renamed successfully')
+    ElMessage.success(t('success.renamed'))
 }
 
 // --- Input Enhancement Methods ---
@@ -1356,6 +1358,7 @@ const fetchDeviceApps = async (deviceId: string) => {
         console.error('Failed to fetch device apps', e)
         // Do NOT fallback to static apps if device fetch fails, as requested
         availableApps.value = [] 
+        // Optional: ElMessage.error(t('error.failed_fetch_apps'))
     }
 }
 
@@ -1451,6 +1454,7 @@ const handleCardAction = async (msg: any, option: any) => {
             })
         } catch (e) {
             console.error('Failed to send interaction response', e)
+            ElMessage.error(t('error.failed_send_interaction'))
         }
     }
 }
@@ -1470,6 +1474,7 @@ const handleCardInput = async (msg: any) => {
             })
         } catch (e) {
             console.error('Failed to send interaction response', e)
+            ElMessage.error(t('error.failed_send_interaction'))
         }
     }
 }
@@ -1520,7 +1525,7 @@ const sendMessage = async () => {
   
   // 1. Auto-rename session (IndexedDB)
   const currentTask = activeTask.value
-  if (currentTask && currentTask.type === 'chat' && currentTask.name.startsWith('Session ')) {
+  if (currentTask && currentTask.type === 'chat' && currentTask.name.startsWith(t('debug.session_prefix'))) {
       const newName = prompt.length > 20 ? prompt.substring(0, 20) + '...' : prompt
       await db.updateSession(currentTask.id, { name: newName })
       currentTask.name = newName
@@ -1550,7 +1555,7 @@ const sendMessage = async () => {
         await api.get(`/tasks/detail/${activeTaskId.value}`)
         // Task exists, update it with latest prompt/name
         await api.put(`/tasks/${activeTaskId.value}`, {
-            name: currentTask?.name || 'Chat Sync',
+            name: currentTask?.name || t('debug.chat_sync'),
             details: prompt
         })
     } catch (e) {
@@ -1559,7 +1564,7 @@ const sendMessage = async () => {
             id: activeTaskId.value,
             device_id: activeDeviceId.value,
             type: 'chat',
-            name: currentTask?.name || 'Chat Sync',
+            name: currentTask?.name || t('debug.chat_sync'),
             details: prompt
         })
     }
@@ -1576,10 +1581,10 @@ const sendMessage = async () => {
     })
     agentStatus.value = 'running'
   } catch (err: any) {
-    const errorMsg = err.response?.data?.detail || 'Failed to start task'
+    const errorMsg = err.response?.data?.detail || t('error.failed_start_task')
     ElMessage.error(errorMsg)
     chatHistory.value.pop() 
-    const errM = { role: 'agent', content: `Error: ${errorMsg}`, sessionId: activeTaskId.value }
+    const errM = { role: 'agent', content: `${t('common.error_prefix')}${errorMsg}`, sessionId: activeTaskId.value }
     chatHistory.value.push(errM)
     db.addMessage(errM)
   } finally {
@@ -1594,7 +1599,7 @@ const stopTask = async () => {
       await api.post('/agent/stop')
   }
   agentStatus.value = 'idle'
-  ElMessage.warning('Task Stopped')
+  ElMessage.warning(t('success.task_stopped'))
 }
 
 // --- Wizard Methods ---
@@ -1620,12 +1625,12 @@ const enableWifiMode = async () => {
   enablingWifi.value = true
   try {
     const res = await api.post('/devices/wifi/enable')
-    ElMessage.success('WiFi Mode Enabled')
+    ElMessage.success(t('success.wifi_enabled'))
     if (res.data.ip) {
       wifiIp.value = res.data.ip
     }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.detail || 'Failed to enable WiFi mode')
+    ElMessage.error(err.response?.data?.detail || t('error.failed_enable_wifi'))
   } finally {
     enablingWifi.value = false
   }
@@ -1635,11 +1640,11 @@ const connectWifi = async () => {
   connectingWifi.value = true
   try {
     await api.post('/devices/connect', { address: wifiIp.value, type: 'adb' })
-    ElMessage.success('Connected via WiFi')
+    ElMessage.success(t('success.connected_wifi'))
     wizardStep.value = 3
     fetchDevices()
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.detail || 'Connection Failed')
+    ElMessage.error(err.response?.data?.detail || t('error.connection_failed'))
   } finally {
     connectingWifi.value = false
   }
@@ -1659,7 +1664,7 @@ const connectWebRTC = async () => {
              devices.value = res.data
              const found = devices.value.find((d: any) => d.type === 'webrtc' && d.status !== 'offline')
              if (found) {
-                ElMessage.success('WebRTC Device Connected!')
+                ElMessage.success(t('success.webrtc_connected'))
                 wizardStep.value = 3
                 clearInterval(poll)
              }
@@ -1667,7 +1672,7 @@ const connectWebRTC = async () => {
      }, 2000)
    } catch (err: any) {
      console.error(err)
-     ElMessage.error('Failed to init WebRTC session')
+     ElMessage.error(t('error.failed_init_webrtc'))
    }
 }
 
@@ -1706,7 +1711,7 @@ const saveConfig = async () => {
   }
   await db.saveConfig(configToSave)
   await syncConfigToBackend()
-  ElMessage.success('Configuration Saved')
+  ElMessage.success(t('success.config_saved'))
   showConfig.value = false
 }
 
@@ -1726,8 +1731,8 @@ const updateStreamQuality = async (key: string, silent = false) => {
     try {
         await api.post('/control/stream/settings', { quality: q, max_width: w })
         if (!silent) {
-            const label = qualityOptions.find(o => o.key === key)?.label || key.toUpperCase()
-            ElMessage.success(`Quality set to ${label}`)
+            const label = t('mirror.quality_' + key)
+            ElMessage.success(t('success.quality_set', { quality: label }))
         }
     } catch (e) {
         // ElMessage.error('Failed to update stream settings')
@@ -1825,7 +1830,7 @@ const connectWS = () => {
   }
   ws.onerror = (e) => { 
       console.error('[Debug] WS Error:', e)
-      wsError.value = 'Connection Blocked or Failed'
+      wsError.value = t('error.connection_blocked')
   }
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data)
@@ -1973,7 +1978,7 @@ const tryFetchFrame = async () => {
                     }
                 }
                 img.onerror = () => {
-                    console.error('Frame image load failed')
+                    console.error(t('debug.frame_load_failed'))
                     // Retry after short delay
                     if (isStreaming.value && activeDeviceId.value) {
                         setTimeout(() => tryFetchFrame(), 200)
@@ -2062,7 +2067,7 @@ const handleLog = (data: any) => {
       forceRefreshFrame()
   } else if (data.level === 'error') {
       ElMessage.error(data.message)
-      const errorMsg: any = { role: 'agent', content: `Error: ${data.message}`, sessionId: activeTaskId.value }
+      const errorMsg: any = { role: 'agent', content: `${t('common.error_prefix')}${data.message}`, sessionId: activeTaskId.value }
       chatHistory.value.push(errorMsg)
       db.addMessage(errorMsg).then(id => errorMsg.id = id)
 

@@ -4,7 +4,12 @@
     "cancel": "Cancel",
     "save": "Save Changes",
     "stop": "Stop",
-    "got_it": "Got it"
+    "got_it": "Got it",
+    "submit": "Submit",
+    "confirm": "Confirm",
+    "deny": "Deny",
+    "allow": "Allow",
+    "error_prefix": "Error: "
   },
   "sidebar": {
     "devices": "DEVICES",
@@ -14,7 +19,11 @@
     "configuration": "CONFIGURATION",
     "model_settings": "Model Settings",
     "connected": "Connected to Server",
-    "disconnected": "Disconnected"
+    "disconnected": "Disconnected",
+    "offline": "Offline",
+    "connection_failed": "Connection Failed: ",
+    "trust_certificate": "Click here to Trust Certificate",
+    "accept_unsafe": "(Accept 'Proceed to unsafe')"
   },
   "topbar": {
     "current_session": "Current Session",
@@ -29,11 +38,27 @@
     "select_device_placeholder": "← Select a device to start",
     "reasoning_chain": "Reasoning Chain",
     "action_executed": "Action Executed",
-    "error_start_task": "Failed to start task"
+    "error_start_task": "Failed to start task",
+    "step_1": "Step 1",
+    "step_2": "Step 2",
+    "generating_session": "Generating Session...",
+    "fps": "FPS",
+    "harmony_os_tip": "HarmonyOS: Use HDC tool",
+    "ios_tip": "iOS: Requires WDA",
+    "input_submitted": "Input Submitted",
+    "selected": "Selected: ",
+    "confirmation_required": "Confirmation Required",
+    "input_required": "Input Required",
+    "enter_value": "Enter value..."
   },
   "mirror": {
     "title": "Device Mirror",
-    "waiting_signal": "WAITING FOR SIGNAL"
+    "waiting_signal": "WAITING FOR SIGNAL",
+    "quality_1080p": "1080P High",
+    "quality_720p": "720P Medium",
+    "quality_480p": "480P Standard",
+    "quality_360p": "360P Smooth",
+    "quality_auto": "Auto"
   },
   "settings": {
     "title": "Agent Configuration",
@@ -90,6 +115,83 @@
     "wifi_ip_desc": "Enter the device IP address (e.g., 192.168.1.5).",
     "wifi_ip_placeholder": "192.168.1.x",
     "connecting": "Connecting...",
-    "success": "Successfully Connected!"
+    "success": "Successfully Connected!",
+    "scan_to_connect": "Scan to Connect",
+    "waiting_device": "Waiting for device connection..."
+  },
+  "task": {
+    "task": "Task",
+    "session": "Session",
+    "select_session": "Select Session",
+    "sessions_local": "Sessions (Local)",
+    "no_sessions": "No sessions",
+    "background_tasks_remote": "Background Tasks (Remote)",
+    "no_tasks": "No tasks",
+    "new_task_title": "New Session / Task",
+    "type": "Type",
+    "name": "Name",
+    "name_placeholder": "e.g. Session 1",
+    "role": "Role (System Prompt)",
+    "role_placeholder": "You are a monitoring agent...",
+    "details": "Task Details",
+    "details_placeholder": "Monitor the battery level and notify me if below 20%..."
+  },
+  "permissions": {
+    "title": "Sensitive Actions Permission",
+    "description": "Enable or disable automatic execution for sensitive actions. Disabled actions will require manual confirmation.",
+    "install_app": "Install Apps",
+    "payment": "Payment Operations",
+    "reply_wechat": "Reply WeChat",
+    "send_sms": "Send SMS",
+    "make_call": "Make Phone Call"
+  },
+  "input": {
+    "upload_image": "Upload Image",
+    "select_app": "Select App",
+    "apps": "Apps",
+    "support_tag": "Support"
+  },
+  "error": {
+    "cannot_select_offline": "Cannot select offline device",
+    "failed_remove_device": "Failed to remove device",
+    "failed_delete_task": "Failed to delete task",
+    "failed_rename_task": "Failed to rename task",
+    "failed_enable_wifi": "Failed to enable WiFi mode",
+    "connection_failed": "Connection Failed",
+    "failed_init_webrtc": "Failed to init WebRTC session",
+    "connection_blocked": "Connection Blocked or Failed",
+    "failed_save_permissions": "Failed to save permissions",
+    "failed_connect_backend": "Failed to connect to backend",
+    "failed_select_device": "Failed to select device",
+    "failed_fetch_tasks": "Failed to fetch tasks",
+    "failed_create_task": "Failed to create task",
+    "failed_load_messages": "Failed to load messages",
+    "failed_fetch_apps": "Failed to fetch device apps",
+    "failed_send_interaction": "Failed to send interaction response",
+    "failed_start_task": "Failed to start task"
+  },
+  "success": {
+    "device_removed": "Device removed",
+    "session_deleted": "Session deleted",
+    "task_deleted": "Task deleted",
+    "renamed": "Renamed successfully",
+    "wifi_enabled": "WiFi Mode Enabled",
+    "connected_wifi": "Connected via WiFi",
+    "webrtc_connected": "WebRTC Device Connected!",
+    "config_saved": "Configuration Saved",
+    "quality_set": "Quality set to {quality}",
+    "task_stopped": "Task Stopped"
+  },
+  "debug": {
+    "session_prefix": "Session ",
+    "new_task": "New Task",
+    "chat_sync": "Chat Sync",
+    "disconnected_code": "Disconnected (Code: {code})",
+    "device_locked": "Device locked, waiting...",
+    "frame_load_failed": "Frame image load failed",
+    "permission_request": "Permission Request",
+    "install_app_request": "The agent needs to install an application. Do you allow this?",
+    "sms_verification": "SMS Verification",
+    "enter_verification_code": "Please enter the verification code you received."
   }
 }

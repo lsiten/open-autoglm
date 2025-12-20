@@ -4,7 +4,12 @@
     "cancel": "取消",
     "save": "保存更改",
     "stop": "停止",
-    "got_it": "知道了"
+    "got_it": "知道了",
+    "submit": "提交",
+    "confirm": "确认",
+    "deny": "拒绝",
+    "allow": "允许",
+    "error_prefix": "错误："
   },
   "sidebar": {
     "devices": "设备列表",
@@ -14,7 +19,11 @@
     "configuration": "配置",
     "model_settings": "模型设置",
     "connected": "已连接服务器",
-    "disconnected": "服务器未连接"
+    "disconnected": "服务器未连接",
+    "offline": "离线",
+    "connection_failed": "连接失败：",
+    "trust_certificate": "点击此处信任证书",
+    "accept_unsafe": "（请接受“继续前往不安全网站”）"
   },
   "topbar": {
     "current_session": "当前会话",
@@ -29,11 +38,21 @@
     "select_device_placeholder": "← 请先选择设备",
     "reasoning_chain": "推理链",
     "action_executed": "执行动作",
-    "error_start_task": "任务启动失败"
+    "error_start_task": "任务启动失败",
+    "input_submitted": "输入已提交",
+    "selected": "已选择：",
+    "confirmation_required": "需要确认",
+    "input_required": "需要输入",
+    "enter_value": "请输入..."
   },
   "mirror": {
     "title": "设备镜像",
-    "waiting_signal": "等待信号中"
+    "waiting_signal": "等待信号中",
+    "quality_1080p": "1080P 高清",
+    "quality_720p": "720P 准高清",
+    "quality_480p": "480P 标清",
+    "quality_360p": "360P 流畅",
+    "quality_auto": "自动"
   },
   "settings": {
     "title": "Agent 配置",
@@ -90,6 +109,79 @@
     "wifi_ip_desc": "输入设备的 IP 地址 (例如 192.168.1.5)。",
     "wifi_ip_placeholder": "192.168.1.x",
     "connecting": "连接中...",
-    "success": "连接成功！"
+    "success": "连接成功！",
+    "scan_to_connect": "扫码连接",
+    "waiting_device": "等待设备连接..."
+  },
+  "task": {
+    "task": "任务",
+    "session": "会话",
+    "select_session": "选择会话",
+    "sessions_local": "会话列表 (本地)",
+    "no_sessions": "暂无会话",
+    "background_tasks_remote": "后台任务 (远程)",
+    "no_tasks": "暂无任务",
+    "new_task_title": "新建会话 / 任务",
+    "type": "类型",
+    "name": "名称",
+    "name_placeholder": "例如：会话 1",
+    "role": "角色 (系统提示词)",
+    "role_placeholder": "你是一个监控助手...",
+    "details": "任务详情",
+    "details_placeholder": "监控电量，低于20%时提醒我..."
+  },
+  "permissions": {
+    "title": "敏感操作权限",
+    "description": "启用或禁用敏感操作的自动执行。禁用的操作将需要人工确认。",
+    "install_app": "安装应用",
+    "payment": "支付操作",
+    "reply_wechat": "回复微信",
+    "send_sms": "发送短信",
+    "make_call": "拨打电话"
+  },
+  "input": {
+    "upload_image": "上传图片",
+    "select_app": "选择应用",
+    "apps": "应用列表",
+    "support_tag": "支持"
+  },
+  "error": {
+    "cannot_select_offline": "无法选择离线设备",
+    "failed_remove_device": "删除设备失败",
+    "failed_delete_task": "删除任务失败",
+    "failed_rename_task": "重命名任务失败",
+    "failed_enable_wifi": "开启 WiFi 模式失败",
+    "connection_failed": "连接失败",
+    "failed_init_webrtc": "WebRTC 初始化失败",
+    "connection_blocked": "连接被阻断或失败",
+    "failed_save_permissions": "保存权限失败",
+    "failed_connect_backend": "连接后端失败",
+    "failed_select_device": "选择设备失败",
+    "failed_fetch_tasks": "获取任务失败",
+    "failed_create_task": "创建任务失败",
+    "failed_load_messages": "加载消息失败",
+    "failed_fetch_apps": "获取应用列表失败",
+    "failed_send_interaction": "发送交互响应失败",
+    "failed_start_task": "启动任务失败"
+  },
+  "success": {
+    "device_removed": "设备已移除",
+    "session_deleted": "会话已删除",
+    "task_deleted": "任务已删除",
+    "renamed": "重命名成功",
+    "wifi_enabled": "WiFi 模式已开启",
+    "connected_wifi": "WiFi 连接成功",
+    "webrtc_connected": "WebRTC 设备已连接！",
+    "config_saved": "配置已保存",
+    "quality_set": "画质已设置为 {quality}",
+    "task_stopped": "任务已停止"
+  },
+  "debug": {
+    "session_prefix": "会话 ",
+    "new_task": "新任务",
+    "chat_sync": "对话同步",
+    "disconnected_code": "已断开 (代码: {code})",
+    "device_locked": "设备已锁定，等待中...",
+    "frame_load_failed": "画面加载失败"
   }
 }
