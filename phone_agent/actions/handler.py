@@ -43,7 +43,7 @@ class ActionHandler:
         self.takeover_callback = takeover_callback or self._default_takeover
 
     def execute(
-        self, action: dict[str, Any], screen_width: int, screen_height: int
+        self, action: dict[str, Any], screen_width: int, screen_height: int, current_app: str = None
     ) -> ActionResult:
         """
         Execute an action from the AI model.
@@ -52,6 +52,7 @@ class ActionHandler:
             action: The action dictionary from the model.
             screen_width: Current screen width in pixels.
             screen_height: Current screen height in pixels.
+            current_app: Current app package name (optional).
 
         Returns:
             ActionResult indicating success and whether to finish.
@@ -64,6 +65,7 @@ class ActionHandler:
             )
 
         if action_type != "do":
+            print(f"[ActionHandler] Warning: Invalid action type '{action_type}'. Action: {action}", flush=True)
             return ActionResult(
                 success=False,
                 should_finish=True,
@@ -74,6 +76,7 @@ class ActionHandler:
         handler_method = self._get_handler(action_name)
 
         if handler_method is None:
+            print(f"[ActionHandler] Warning: Unknown action '{action_name}'. Action: {action}", flush=True)
             return ActionResult(
                 success=False,
                 should_finish=False,
@@ -81,6 +84,11 @@ class ActionHandler:
             )
 
         try:
+            print(f"[ActionHandler] Executing action: {action_name} with params: {action}", flush=True)
+            # Pass current_app to handler if it accepts it, otherwise backward compatible
+            # Actually, let's just update internal handlers to accept **kwargs or explicitly
+            # For simplicity, we can set self.current_app temporarily
+            self.current_app = current_app 
             return handler_method(action, screen_width, screen_height)
         except Exception as e:
             return ActionResult(
@@ -120,12 +128,46 @@ class ActionHandler:
         app_name = action.get("app")
         if not app_name:
             return ActionResult(False, False, "No app name specified")
-
+        
+        app_name = app_name.strip()
+        
         device_factory = get_device_factory()
         success = device_factory.launch_app(app_name, self.device_id)
         if success:
+            time.sleep(TIMING_CONFIG.device.default_launch_delay)
             return ActionResult(True, False)
-        return ActionResult(False, False, f"App not found: {app_name}")
+            
+        # App not found -> Potential Install
+        if not self._check_sensitive_permission("install_app", f"Install app '{app_name}'"):
+            return ActionResult(False, True, "User denied app installation")
+
+        return ActionResult(
+            success=False, 
+            should_finish=False, 
+            message=f"App '{app_name}' is not installed. Asking user for permission is required to install it."
+        )
+
+    def _check_sensitive_permission(self, permission_key: str, message: str) -> bool:
+        """
+        Check if a sensitive action is allowed by configuration.
+        Returns True if allowed (auto-approve), False if requires manual confirmation.
+        """
+        if self.confirmation_callback:
+            # We assume confirmation_callback signature is (message) -> bool
+            # But we want to pass permission_key too. 
+            # We can overload the message or assume callback handles it if we pass a dict?
+            # Or better, just modify the callback in AgentRunner to parse it.
+            # For backward compatibility, let's format the message.
+            # But AgentRunner needs the key to look up permissions.
+            # Let's try to pass a tuple or special string if the callback allows it?
+            # Or relies on the callback being smart.
+            
+            # Actually, the best way is to update the type hint and pass more info if possible.
+            # But to avoid breaking changes, let's prefix the message.
+            # "[PERMISSION:install_app] Message..."
+            full_msg = f"[PERMISSION:{permission_key}] {message}"
+            return self.confirmation_callback(full_msg)
+        return False
 
     def _handle_tap(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle tap action."""
@@ -135,22 +177,44 @@ class ActionHandler:
 
         x, y = self._convert_relative_to_absolute(element, width, height)
 
-        # Check for sensitive operation
-        if "message" in action:
-            if not self.confirmation_callback(action["message"]):
-                return ActionResult(
-                    success=False,
-                    should_finish=True,
-                    message="User cancelled sensitive operation",
-                )
+        # Sensitive Action Check
+        current = getattr(self, 'current_app', '') or ''
+        current = current.lower()
+        
+        # Payment Check
+        if any(app in current for app in ['alipay', 'wallet', 'pay']):
+             if not self._check_sensitive_permission("payment", "Perform payment operation"):
+                 return ActionResult(False, True, "User denied payment operation")
+        
+        # Make Call Check
+        if any(app in current for app in ['dialer', 'contact', 'phone']):
+             # Heuristic: Tapping call button (usually green or specific icon) is hard to know without icon detection
+             # But we can be conservative
+             if not self._check_sensitive_permission("make_call", "Make phone call"):
+                 return ActionResult(False, True, "User denied phone call")
 
         device_factory = get_device_factory()
         device_factory.tap(x, y, self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_tap_delay)
         return ActionResult(True, False)
 
     def _handle_type(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle text input action."""
         text = action.get("text", "")
+
+        # Sensitive Action Check
+        current = getattr(self, 'current_app', '') or ''
+        current = current.lower()
+        
+        # WeChat Reply
+        if 'tencent.mm' in current or 'wechat' in current:
+             if not self._check_sensitive_permission("wechat_reply", f"Reply to WeChat: {text}"):
+                 return ActionResult(False, True, "User denied WeChat reply")
+
+        # Send SMS
+        if any(app in current for app in ['mms', 'messaging', 'sms']):
+             if not self._check_sensitive_permission("send_sms", f"Send SMS: {text}"):
+                 return ActionResult(False, True, "User denied sending SMS")
 
         device_factory = get_device_factory()
 
@@ -185,18 +249,21 @@ class ActionHandler:
 
         device_factory = get_device_factory()
         device_factory.swipe(start_x, start_y, end_x, end_y, device_id=self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_swipe_delay)
         return ActionResult(True, False)
 
     def _handle_back(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle back button action."""
         device_factory = get_device_factory()
         device_factory.back(self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_back_delay)
         return ActionResult(True, False)
 
     def _handle_home(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle home button action."""
         device_factory = get_device_factory()
         device_factory.home(self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_home_delay)
         return ActionResult(True, False)
 
     def _handle_double_tap(self, action: dict, width: int, height: int) -> ActionResult:
@@ -208,6 +275,7 @@ class ActionHandler:
         x, y = self._convert_relative_to_absolute(element, width, height)
         device_factory = get_device_factory()
         device_factory.double_tap(x, y, self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_double_tap_delay)
         return ActionResult(True, False)
 
     def _handle_long_press(self, action: dict, width: int, height: int) -> ActionResult:
@@ -219,6 +287,7 @@ class ActionHandler:
         x, y = self._convert_relative_to_absolute(element, width, height)
         device_factory = get_device_factory()
         device_factory.long_press(x, y, device_id=self.device_id)
+        time.sleep(TIMING_CONFIG.device.default_long_press_delay)
         return ActionResult(True, False)
 
     def _handle_wait(self, action: dict, width: int, height: int) -> ActionResult:
@@ -345,6 +414,11 @@ def parse_action(response: str) -> dict[str, Any]:
     print(f"Parsing action: {response}")
     try:
         response = response.strip()
+        
+        # Clean up XML tags if present
+        if "</answer>" in response:
+            response = response.split("</answer>")[0].strip()
+            
         if response.startswith('do(action="Type"') or response.startswith(
             'do(action="Type_Name"'
         ):

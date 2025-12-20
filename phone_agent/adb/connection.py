@@ -156,6 +156,22 @@ class ADBConnection:
                         if part.startswith("model:"):
                             model = part.split(":", 1)[1]
                             break
+                    
+                    # Req 3: Unified Device Renaming
+                    # Try to get friendly name via getprop
+                    try:
+                        prop_cmd = subprocess.run(
+                            [self.adb_path, "-s", device_id, "shell", "getprop", "ro.product.model"],
+                            capture_output=True, text=True, timeout=1
+                        )
+                        if prop_cmd.returncode == 0 and prop_cmd.stdout.strip():
+                            model = prop_cmd.stdout.strip()
+                    except Exception:
+                        pass
+                    
+                    # Fallback if still None
+                    if not model:
+                        model = device_id
 
                     devices.append(
                         DeviceInfo(

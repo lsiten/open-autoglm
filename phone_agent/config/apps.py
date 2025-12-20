@@ -65,6 +65,8 @@ APP_PACKAGES: dict[str, str] = {
     # Finance
     "同花顺": "com.hexin.plat.android",
     # Games
+    "王者荣耀": "com.tencent.tmgp.sgame",
+    "王者": "com.tencent.tmgp.sgame",
     "星穹铁道": "com.miHoYo.hkrpg",
     "崩坏：星穹铁道": "com.miHoYo.hkrpg",
     "恋与深空": "com.papegames.lysk.cn",

@@ -39,14 +39,14 @@ class DeviceTimingConfig:
     """Configuration for device operation timing delays."""
 
     # Default delays for various device operations (in seconds)
-    default_tap_delay: float = 1.0  # Default delay after tap
-    default_double_tap_delay: float = 1.0  # Default delay after double tap
+    default_tap_delay: float = 2.0  # Default delay after tap
+    default_double_tap_delay: float = 1.5  # Default delay after double tap
     double_tap_interval: float = 0.1  # Interval between two taps in double tap
     default_long_press_delay: float = 1.0  # Default delay after long press
-    default_swipe_delay: float = 1.0  # Default delay after swipe
-    default_back_delay: float = 1.0  # Default delay after back button
-    default_home_delay: float = 1.0  # Default delay after home button
-    default_launch_delay: float = 1.0  # Default delay after launching app
+    default_swipe_delay: float = 2.0  # Default delay after swipe
+    default_back_delay: float = 1.5  # Default delay after back button
+    default_home_delay: float = 2.0  # Default delay after home button
+    default_launch_delay: float = 5.0  # Default delay after launching app
 
     def __post_init__(self):
         """Load values from environment variables if present."""

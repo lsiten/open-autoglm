@@ -14,6 +14,7 @@ from phone_agent.adb.device import (
     home,
     launch_app,
     long_press,
+    recent,
     swipe,
     tap,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "swipe",
     "back",
     "home",
+    "recent",
     "double_tap",
     "long_press",
     "launch_app",

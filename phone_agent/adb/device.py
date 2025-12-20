@@ -8,6 +8,61 @@ from typing import List, Optional, Tuple
 from phone_agent.config.apps import APP_PACKAGES
 from phone_agent.config.timing import TIMING_CONFIG
 
+_screen_size_cache = {}
+
+def is_screen_on(device_id: str | None = None) -> bool:
+    """
+    Check if the screen is on and unlocked (not dreaming/keyguard).
+    Returns True if user can interact with screen.
+    """
+    adb_prefix = _get_adb_prefix(device_id)
+    try:
+        # Check power state (Screen On/Off)
+        res_power = subprocess.run(
+            adb_prefix + ["shell", "dumpsys", "power"],
+            capture_output=True, text=True, timeout=2
+        )
+        if "mWakefulness=Asleep" in res_power.stdout or "mWakefulness=Dozing" in res_power.stdout:
+            return False
+
+        # Check Keyguard/Lockscreen (Screen On but Locked)
+        res_window = subprocess.run(
+            adb_prefix + ["shell", "dumpsys", "window", "policy"],
+            capture_output=True, text=True, timeout=2
+        )
+        # Common indicators of lock screen
+        if "mInputRestricted=true" in res_window.stdout: # Keyguard restricted input
+            return False
+        if "isStatusBarKeyguard=true" in res_window.stdout: # Keyguard showing
+            return False
+        if "mKeyguardDrawComplete=true" in res_window.stdout and "mKeyguardOccluded=false" in res_window.stdout:
+            return False
+            
+        return True
+    except Exception:
+        # If check fails, assume ON to be safe (allow retries) or OFF?
+        # Assuming ON allows error recovery.
+        return True
+
+def get_screen_size(device_id: str | None = None) -> Tuple[int, int]:
+    if device_id in _screen_size_cache:
+        return _screen_size_cache[device_id]
+    
+    adb_prefix = _get_adb_prefix(device_id)
+    try:
+        result = subprocess.run(
+            adb_prefix + ["shell", "wm", "size"], 
+            capture_output=True, text=True, timeout=2
+        )
+        for line in result.stdout.splitlines():
+            if "Physical size:" in line:
+                parts = line.split(":")[1].strip().split("x")
+                w, h = int(parts[0]), int(parts[1])
+                _screen_size_cache[device_id] = (w, h)
+                return w, h
+    except Exception:
+        pass
+    return 1080, 2400 # Default fallback
 
 def get_current_app(device_id: str | None = None) -> str:
     """
@@ -39,19 +94,24 @@ def get_current_app(device_id: str | None = None) -> str:
 
 
 def tap(
-    x: int, y: int, device_id: str | None = None, delay: float | None = None
+    x: int | float, y: int | float, device_id: str | None = None, delay: float | None = None
 ) -> None:
     """
     Tap at the specified coordinates.
 
     Args:
-        x: X coordinate.
-        y: Y coordinate.
+        x: X coordinate (int) or normalized (float <= 1.0).
+        y: Y coordinate (int) or normalized (float <= 1.0).
         device_id: Optional ADB device ID.
         delay: Delay in seconds after tap. If None, uses configured default.
     """
     if delay is None:
         delay = TIMING_CONFIG.device.default_tap_delay
+
+    if isinstance(x, float) and x <= 1.0:
+        w, h = get_screen_size(device_id)
+        x = int(x * w)
+        y = int(y * h)
 
     adb_prefix = _get_adb_prefix(device_id)
 
@@ -119,10 +179,10 @@ def long_press(
 
 
 def swipe(
-    start_x: int,
-    start_y: int,
-    end_x: int,
-    end_y: int,
+    start_x: int | float,
+    start_y: int | float,
+    end_x: int | float,
+    end_y: int | float,
     duration_ms: int | None = None,
     device_id: str | None = None,
     delay: float | None = None,
@@ -141,6 +201,14 @@ def swipe(
     """
     if delay is None:
         delay = TIMING_CONFIG.device.default_swipe_delay
+    
+    # Scale normalized coordinates
+    if isinstance(start_x, float) and start_x <= 1.0:
+        w, h = get_screen_size(device_id)
+        start_x = int(start_x * w)
+        start_y = int(start_y * h)
+        end_x = int(end_x * w)
+        end_y = int(end_y * h)
 
     adb_prefix = _get_adb_prefix(device_id)
 
@@ -205,6 +273,46 @@ def home(device_id: str | None = None, delay: float | None = None) -> None:
     time.sleep(delay)
 
 
+def recent(device_id: str | None = None, delay: float | None = None) -> None:
+    """
+    Press the recent apps button.
+
+    Args:
+        device_id: Optional ADB device ID.
+        delay: Delay in seconds.
+    """
+    if delay is None:
+        delay = TIMING_CONFIG.device.default_home_delay
+
+    adb_prefix = _get_adb_prefix(device_id)
+
+    subprocess.run(
+        adb_prefix + ["shell", "input", "keyevent", "KEYCODE_APP_SWITCH"], capture_output=True
+    )
+    time.sleep(delay)
+
+
+def get_installed_packages(device_id: str | None = None, include_system: bool = True) -> List[str]:
+    """Get list of installed packages."""
+    adb_prefix = _get_adb_prefix(device_id)
+    cmd = adb_prefix + ["shell", "pm", "list", "packages"]
+    if not include_system:
+        cmd.append("-3")
+        
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=5
+        )
+        packages = []
+        for line in result.stdout.splitlines():
+            if line.startswith("package:"):
+                packages.append(line.split(":", 1)[1].strip())
+        return packages
+    except Exception:
+        return []
+
+
 def launch_app(
     app_name: str, device_id: str | None = None, delay: float | None = None
 ) -> bool:
@@ -222,11 +330,30 @@ def launch_app(
     if delay is None:
         delay = TIMING_CONFIG.device.default_launch_delay
 
-    if app_name not in APP_PACKAGES:
-        return False
+    package = None
+    if app_name in APP_PACKAGES:
+        package = APP_PACKAGES[app_name]
+    else:
+        # Req 2: Dynamic fallback
+        # Try to find in installed packages
+        print(f"[Device] App '{app_name}' not in config, searching installed packages...")
+        installed = get_installed_packages(device_id)
+        # Simple heuristic: fuzzy match
+        normalized_name = app_name.lower()
+        
+        # Exact substring match
+        matches = [pkg for pkg in installed if normalized_name in pkg.lower()]
+        
+        if matches:
+            # Pick shortest one (usually the main app)
+            matches.sort(key=len)
+            package = matches[0]
+            print(f"[Device] Dynamic app match: {app_name} -> {package}")
+        else:
+            print(f"[Device] App '{app_name}' not found on device.")
+            return False
 
     adb_prefix = _get_adb_prefix(device_id)
-    package = APP_PACKAGES[app_name]
 
     subprocess.run(
         adb_prefix

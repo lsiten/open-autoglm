@@ -1,0 +1,94 @@
+{
+  "common": {
+    "loading": "ロディン...",
+    "cancel": "취소",
+    "save": "변경 사항 저장",
+    "stop": "중지",
+    "got_it": "확인"
+  },
+  "sidebar": {
+    "devices": "장치 목록",
+    "no_devices": "장치가 감지되지 않음",
+    "connect_guide_hint": "연결 가이드 보기",
+    "configuration": "설정",
+    "model_settings": "모델 설정",
+    "connected": "서버에 연결됨",
+    "disconnected": "연결 끊김"
+  },
+  "topbar": {
+    "current_session": "현재 세션",
+    "chat": "채팅",
+    "debug": "디버그"
+  },
+  "chat": {
+    "ready_title": "준비 완료",
+    "ready_subtitle": "아래에 명령어를 입력하여 {device}를 제어하세요",
+    "ready_subtitle_no_device": "장치를 선택하고 명령어를 입력하여 시작하세요",
+    "input_placeholder": "지시 사항 입력...",
+    "select_device_placeholder": "← 장치를 먼저 선택하세요",
+    "reasoning_chain": "추론 체인",
+    "action_executed": "실행된 작업",
+    "error_start_task": "작업 시작 실패"
+  },
+  "mirror": {
+    "title": "장치 미러링",
+    "waiting_signal": "신호 대기 중"
+  },
+  "settings": {
+    "title": "에이전트 설정",
+    "provider": "공급자",
+    "base_url": "모델 API URL",
+    "model_name": "모델 이름",
+    "api_key": "API 키",
+    "local_tip": "로컬 vLLM의 경우 'EMPTY'로 두세요"
+  },
+  "guide": {
+    "title": "장치 연결",
+    "subtitle": "AutoGLM을 시작할 연결 방법을 선택하세요",
+    "prerequisites": "전제 조건",
+    "prereq_text": "장치가 USB 또는 WiFi를 통해 연결되어 있는지 확인하세요.",
+    "usb_option": "옵션 1: USB 케이블",
+    "usb_steps": {
+      "step1": "USB를 통해 휴대폰을 컴퓨터에 연결합니다.",
+      "step2": "개발자 옵션을 활성화합니다 (설정에서 빌드 번호를 7번 탭).",
+      "step3": "USB 디버깅을 켭니다.",
+      "step4": "휴대폰 팝업에서 '허용'을 탭합니다."
+    },
+    "wifi_option": "옵션 2: 무선 (WiFi)",
+    "wifi_text": "휴대폰과 PC가 동일한 WiFi에 있는지 확인하세요.",
+    "wifi_step1": "# 1. USB를 연결하여 포트 설정:",
+    "wifi_step2": "# 2. USB를 뽑고 연결:",
+    "wifi_tip": "설정 > 휴대전화 정보 > 상태에서 IP를 확인하세요.",
+    "refresh_list": "목록 새로고침"
+  },
+  "wizard": {
+    "title": "새 장치 추가",
+    "step_type": "연결 유형",
+    "step_usb": "USB 설정",
+    "step_wifi": "WiFi 설정",
+    "btn_next": "다음",
+    "btn_prev": "이전",
+    "btn_connect": "연결",
+    "btn_finish": "완료",
+    "type_usb": "USB 연결",
+    "type_wifi": "WiFi 연결",
+    "type_webrtc": "WebRTC 연결",
+    "step_webrtc": "WebRTC 설정",
+    "webrtc_desc": "시그널링 URL을 통해 원격 장치에 연결합니다.",
+    "webrtc_placeholder": "wss://remote-device.com/socket",
+    "btn_connect_webrtc": "스트림 연결",
+    "usb_instr_1": "USB 케이블을 통해 장치를 컴퓨터에 연결하십시오.",
+    "usb_instr_2": "개발자 옵션에서 'USB 디버깅'이 활성화되어 있는지 확인하십시오.",
+    "usb_check": "연결 확인",
+    "usb_found": "장치를 찾았습니다!",
+    "usb_not_found": "장치가 감지되지 않았습니다. 케이블과 설정을 확인하십시오.",
+    "wifi_mode_title": "무선 모드 활성화",
+    "wifi_mode_desc": "무선 디버깅을 아직 활성화하지 않은 경우 먼저 USB로 연결하십시오.",
+    "wifi_mode_btn": "USB를 통해 활성화",
+    "wifi_ip_title": "IP로 연결",
+    "wifi_ip_desc": "장치 IP 주소를 입력하십시오 (예: 192.168.1.5).",
+    "wifi_ip_placeholder": "192.168.1.x",
+    "connecting": "연결 중...",
+    "success": "연결되었습니다!"
+  }
+}

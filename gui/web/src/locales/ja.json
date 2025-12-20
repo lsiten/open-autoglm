@@ -1,0 +1,94 @@
+{
+  "common": {
+    "loading": "読み込み中...",
+    "cancel": "キャンセル",
+    "save": "変更を保存",
+    "stop": "停止",
+    "got_it": "了解"
+  },
+  "sidebar": {
+    "devices": "デバイス",
+    "no_devices": "デバイスが見つかりません",
+    "connect_guide_hint": "接続ガイドを表示",
+    "configuration": "設定",
+    "model_settings": "モデル設定",
+    "connected": "サーバー接続済み",
+    "disconnected": "切断されました"
+  },
+  "topbar": {
+    "current_session": "現在のセッション",
+    "chat": "チャット",
+    "debug": "デバッグ"
+  },
+  "chat": {
+    "ready_title": "準備完了",
+    "ready_subtitle": "コマンドを入力して {device} を操作します",
+    "ready_subtitle_no_device": "デバイスを選択してコマンドを入力してください",
+    "input_placeholder": "指示を入力...",
+    "select_device_placeholder": "← デバイスを選択してください",
+    "reasoning_chain": "推論チェーン",
+    "action_executed": "実行されたアクション",
+    "error_start_task": "タスクの開始に失敗しました"
+  },
+  "mirror": {
+    "title": "デバイスミラー",
+    "waiting_signal": "信号待機中"
+  },
+  "settings": {
+    "title": "エージェント設定",
+    "provider": "プロバイダー",
+    "base_url": "モデル API URL",
+    "model_name": "モデル名",
+    "api_key": "API キー",
+    "local_tip": "ローカル vLLM の場合は 'EMPTY' のままにしてください"
+  },
+  "guide": {
+    "title": "デバイスを接続",
+    "subtitle": "接続方法を選択して AutoGLM を開始します",
+    "prerequisites": "前提条件",
+    "prereq_text": "USB または WiFi 経由でデバイスが接続されていることを確認してください。",
+    "usb_option": "オプション 1: USB ケーブル",
+    "usb_steps": {
+      "step1": "USB で携帯電話を PC に接続します。",
+      "step2": "開発者オプションを有効にします（ビルド番号を7回タップ）。",
+      "step3": "USB デバッグをオンにします。",
+      "step4": "携帯電話のポップアップで「許可」をタップします。"
+    },
+    "wifi_option": "オプション 2: ワイヤレス (WiFi)",
+    "wifi_text": "携帯電話と PC が同じ WiFi 上にあることを確認してください。",
+    "wifi_step1": "# 1. USB を接続してポートを設定:",
+    "wifi_step2": "# 2. USB を外して接続:",
+    "wifi_tip": "設定 > 端末情報 > ステータス で IP を確認できます。",
+    "refresh_list": "リストを更新"
+  },
+  "wizard": {
+    "title": "新しいデバイスを追加",
+    "step_type": "接続タイプ",
+    "step_usb": "USB 設定",
+    "step_wifi": "WiFi 設定",
+    "btn_next": "次へ",
+    "btn_prev": "戻る",
+    "btn_connect": "接続",
+    "btn_finish": "完了",
+    "type_usb": "USB 接続",
+    "type_wifi": "WiFi 接続",
+    "type_webrtc": "WebRTC 接続",
+    "step_webrtc": "WebRTC 設定",
+    "webrtc_desc": "シグナリング URL 経由でリモートデバイスに接続します。",
+    "webrtc_placeholder": "wss://remote-device.com/socket",
+    "btn_connect_webrtc": "ストリームに接続",
+    "usb_instr_1": "USB ケーブルでデバイスをコンピュータに接続してください。",
+    "usb_instr_2": "開発者向けオプションで 'USB デバッグ' が有効になっていることを確認してください。",
+    "usb_check": "接続を確認",
+    "usb_found": "デバイスが見つかりました！",
+    "usb_not_found": "デバイスが検出されません。ケーブルと設定を確認してください。",
+    "wifi_mode_title": "ワイヤレスモードを有効化",
+    "wifi_mode_desc": "ワイヤレスデバッグをまだ有効にしていない場合は、まず USB で接続してください。",
+    "wifi_mode_btn": "USB 経由で有効化",
+    "wifi_ip_title": "IP で接続",
+    "wifi_ip_desc": "デバイスの IP アドレスを入力してください (例: 192.168.1.5)。",
+    "wifi_ip_placeholder": "192.168.1.x",
+    "connecting": "接続中...",
+    "success": "接続に成功しました！"
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "save": "Save Changes",
+    "stop": "Stop",
+    "got_it": "Got it"
+  },
+  "sidebar": {
+    "devices": "DEVICES",
+    "no_devices": "No devices detected",
+    "connect_guide_hint": "Click for Connection Guide",
+    "add_device": "Add New Device",
+    "configuration": "CONFIGURATION",
+    "model_settings": "Model Settings",
+    "connected": "Connected to Server",
+    "disconnected": "Disconnected"
+  },
+  "topbar": {
+    "current_session": "Current Session",
+    "chat": "Chat",
+    "debug": "Debug"
+  },
+  "chat": {
+    "ready_title": "Ready to assist",
+    "ready_subtitle": "Type a command below to control {device}",
+    "ready_subtitle_no_device": "Select a device and type a command to start",
+    "input_placeholder": "Type instructions...",
+    "select_device_placeholder": "← Select a device to start",
+    "reasoning_chain": "Reasoning Chain",
+    "action_executed": "Action Executed",
+    "error_start_task": "Failed to start task"
+  },
+  "mirror": {
+    "title": "Device Mirror",
+    "waiting_signal": "WAITING FOR SIGNAL"
+  },
+  "settings": {
+    "title": "Agent Configuration",
+    "provider": "Provider",
+    "base_url": "Model API Base URL",
+    "model_name": "Model Name",
+    "api_key": "API Key",
+    "local_tip": "Leave as 'EMPTY' for local vLLM"
+  },
+  "guide": {
+    "title": "Connect Your Device",
+    "subtitle": "Choose a connection method to start using AutoGLM",
+    "prerequisites": "Prerequisites",
+    "prereq_text": "Ensure your device is connected via USB or is on the same WiFi network.",
+    "usb_option": "Option 1: USB Cable",
+    "usb_steps": {
+      "step1": "Connect phone to computer via USB.",
+      "step2": "Enable Developer Options (Tap 'Build Number' 7 times).",
+      "step3": "Turn on USB Debugging.",
+      "step4": "Tap 'Allow' on the phone popup."
+    },
+    "wifi_option": "Option 2: Wireless (WiFi)",
+    "wifi_text": "Ensure phone and PC are on the same WiFi.",
+    "wifi_step1": "# 1. Connect USB once to set port:",
+    "wifi_step2": "# 2. Unplug USB & connect:",
+    "wifi_tip": "Find IP in Settings > About Phone > Status.",
+    "refresh_list": "Refresh Device List"
+  },
+  "wizard": {
+    "title": "Add New Device",
+    "step_type": "Connection Type",
+    "step_usb": "USB Setup",
+    "step_wifi": "WiFi Setup",
+    "btn_next": "Next",
+    "btn_prev": "Back",
+    "btn_connect": "Connect",
+    "btn_finish": "Finish",
+    "type_usb": "USB Connection",
+    "type_wifi": "WiFi Connection",
+    "type_webrtc": "WebRTC Connection",
+    "step_webrtc": "WebRTC Setup",
+    "webrtc_desc": "Please scan this QR code using the AutoGLM App.",
+    "webrtc_placeholder": "wss://remote-device.com/socket",
+    "btn_connect_webrtc": "Connect Stream",
+    "usb_instr_1": "Connect your device to the computer via USB cable.",
+    "usb_instr_2": "Ensure 'USB Debugging' is enabled in Developer Options.",
+    "usb_check": "Check Connection",
+    "usb_found": "Device Found!",
+    "usb_not_found": "No device detected. Please check cable and settings.",
+    "wifi_mode_title": "Enable Wireless Mode",
+    "wifi_mode_desc": "If you haven't enabled wireless debugging yet, connect via USB first.",
+    "wifi_mode_btn": "Enable via USB",
+    "wifi_ip_title": "Connect via IP",
+    "wifi_ip_desc": "Enter the device IP address (e.g., 192.168.1.5).",
+    "wifi_ip_placeholder": "192.168.1.x",
+    "connecting": "Connecting...",
+    "success": "Successfully Connected!"
+  }
+}

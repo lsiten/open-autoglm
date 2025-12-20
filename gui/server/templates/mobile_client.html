@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AutoGLM Device</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --card-bg: #1c1c1e;
+            --text-color: #ffffff;
+            --accent-color: #0a84ff;
+            --danger-color: #ff453a;
+            --success-color: #30d158;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 40px;
+            margin-top: 20px;
+            font-weight: 700;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            width: 100%;
+            max-width: 320px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            margin-bottom: 24px;
+        }
+        .status-label {
+            font-size: 14px;
+            color: #8e8e93;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .status-value {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .connected { color: var(--success-color); }
+        .disconnected { color: var(--danger-color); }
+        .connecting { color: #ff9f0a; }
+
+        button {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 16px 0;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            width: 100%;
+            max-width: 320px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            margin-bottom: 24px;
+        }
+        button:active {
+            opacity: 0.8;
+        }
+        button:disabled {
+            background: #3a3a3c;
+            color: #8e8e93;
+        }
+
+        #log {
+            font-family: "SF Mono", Menlo, monospace;
+            font-size: 11px;
+            color: #8e8e93;
+            text-align: left;
+            width: 100%;
+            max-width: 320px;
+            flex: 1;
+            overflow-y: auto;
+            background: #111;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <h1>AutoGLM Device</h1>
+    
+    <div class="card">
+        <div class="status-label">Connection Status</div>
+        <div id="statusText" class="status-value disconnected">Disconnected</div>
+    </div>
+    
+    <button id="shareBtn">Start Screen Share</button>
+    <button id="connectBtn" style="display:none;">Reconnect</button>
+
+    <div id="log"></div>
+
+    <!-- Hidden video element for capture -->
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <!-- Canvas for frame extraction -->
+    <canvas id="canvas" style="display:none;"></canvas>
+    <!-- Visual feedback for taps -->
+    <div id="tap-indicator" style="position:fixed; width:20px; height:20px; background:rgba(255,0,0,0.5); border-radius:50%; pointer-events:none; display:none; z-index:9999;"></div>
+
+    <script>
+        const token = window.location.pathname.split('/').pop();
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/devices/webrtc/connect/${token}`;
+        
+        let ws;
+        let stream;
+        let captureInterval;
+        
+        const statusText = document.getElementById('statusText');
+        const connectBtn = document.getElementById('connectBtn');
+        const shareBtn = document.getElementById('shareBtn');
+        const logDiv = document.getElementById('log');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const tapIndicator = document.getElementById('tap-indicator');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            const line = document.createElement('div');
+            line.innerText = `[${time}] ${msg}`;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function setStatus(state, text) {
+            statusText.className = 'status-value ' + state;
+            statusText.innerText = text;
+        }
+
+        async function startCapture() {
+            try {
+                // Try screen sharing first
+                try {
+                    stream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { cursor: "always" },
+                        audio: false
+                    });
+                } catch (err) {
+                    log('Screen share failed or not supported.');
+                    if (navigator.userAgent.match(/iPhone|iPad|iPod/i)) {
+                        log('Note: iOS Safari does not support web-based screen sharing.');
+                        alert('iOS Safari does not support web-based screen sharing. Using virtual placeholder.');
+                    }
+                    
+                    // Fallback to virtual canvas if user rejected camera or it's iOS
+                    startVirtualStream();
+                    return;
+                }
+                
+                video.srcObject = stream;
+                
+                // Wait for video to load
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth / 2;
+                    canvas.height = video.videoHeight / 2;
+                    log(`Capture started: ${video.videoWidth}x${video.videoHeight}`);
+                    
+                    shareBtn.style.display = 'none';
+                    
+                    // Start sending frames
+                    startSendingFrames();
+                };
+                
+            } catch (err) {
+                log('Error starting capture: ' + err.message);
+                console.error(err);
+            }
+        }
+        
+        function startVirtualStream() {
+            canvas.width = 360;
+            canvas.height = 640;
+            shareBtn.style.display = 'none';
+            log('Starting virtual stream (iOS/Fallback mode)...');
+            
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                cancelAnimationFrame(captureInterval);
+            }
+            
+            let lastTime = 0;
+            const targetFPS = 5; // 5 FPS for virtual is enough
+            const interval = 1000 / targetFPS;
+            
+            const loop = (timestamp) => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    captureInterval = requestAnimationFrame(loop);
+                    return;
+                }
+                
+                if (timestamp - lastTime >= interval) {
+                    lastTime = timestamp;
+                    
+                    // Draw placeholder
+                    ctx.fillStyle = '#1c1c1e';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('iOS / Screen Share Unavailable', canvas.width/2, canvas.height/2 - 20);
+                    ctx.font = '14px Arial';
+                    ctx.fillText('Web-based screen sharing is', canvas.width/2, canvas.height/2 + 20);
+                    ctx.fillText('not supported on iOS Safari.', canvas.width/2, canvas.height/2 + 40);
+                    
+                    // Add timestamp
+                    ctx.fillStyle = '#0a84ff';
+                    ctx.fillText(new Date().toLocaleTimeString() + '.' + Math.floor(timestamp % 1000), canvas.width/2, canvas.height/2 + 80);
+
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+                    const base64 = dataUrl.split(',')[1];
+                    
+                    ws.send(JSON.stringify({
+                        type: 'screenshot',
+                        data: base64
+                    }));
+                }
+                captureInterval = requestAnimationFrame(loop);
+            };
+            
+            captureInterval = requestAnimationFrame(loop);
+        }
+        
+        function startSendingFrames() {
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                cancelAnimationFrame(captureInterval);
+            }
+            
+            // Use requestAnimationFrame for smoother timing, but throttle to limit bandwidth
+            let lastTime = 0;
+            const targetFPS = 10; // Target 10 FPS
+            const interval = 1000 / targetFPS;
+            
+            const loop = (timestamp) => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    captureInterval = requestAnimationFrame(loop);
+                    return;
+                }
+                
+                if (timestamp - lastTime >= interval) {
+                    lastTime = timestamp;
+                    
+                    try {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        
+                        // Low quality JPEG (0.4) for speed
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+                        const base64 = dataUrl.split(',')[1];
+                        
+                        ws.send(JSON.stringify({
+                            type: 'screenshot',
+                            data: base64
+                        }));
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }
+                
+                captureInterval = requestAnimationFrame(loop);
+            };
+            
+            captureInterval = requestAnimationFrame(loop);
+        }
+
+        function handleCommand(cmd) {
+            if (cmd.type === 'tap') {
+                showTap(cmd.x, cmd.y);
+            }
+        }
+        
+        function showTap(x, y) {
+            // Map coordinates if necessary, assuming relative or absolute
+            // Here assuming absolute pixels matching the video resolution we sent?
+            // Or maybe percentage? Let's assume the backend sends back what matched the screenshot.
+            
+            // Note: The screenshot was downscaled.
+            // But let's just show it on the viewport.
+            
+            tapIndicator.style.left = x + 'px';
+            tapIndicator.style.top = y + 'px';
+            tapIndicator.style.display = 'block';
+            setTimeout(() => tapIndicator.style.display = 'none', 200);
+            
+            log(`Tap received at ${x}, ${y}`);
+        }
+
+        function connect() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+            setStatus('connecting', 'Connecting...');
+            log(`Connecting to server...`);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (e) {
+                log('WS Create Error: ' + e.message);
+                setStatus('disconnected', 'Error');
+                return;
+            }
+
+            ws.onopen = () => {
+                log('WebSocket Open!');
+                setStatus('connected', 'Online');
+                
+                // Send initial handshake
+                ws.send(JSON.stringify({
+                    device_id: 'Mobile-Web-' + Math.floor(Math.random() * 10000),
+                    width: window.screen.width,
+                    height: window.screen.height,
+                    platform: navigator.platform
+                }));
+                
+                // If we already have a stream, restart sending
+                if (stream) startSendingFrames();
+            };
+
+            ws.onmessage = (event) => {
+                // Handle control commands
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleCommand(msg);
+                } catch (e) {
+                    log('RX: ' + event.data);
+                }
+            };
+
+            ws.onclose = (e) => {
+                log(`Closed: ${e.code} ${e.reason}`);
+                if (e.code === 4001) {
+                    setStatus('disconnected', 'Invalid Token');
+                } else {
+                    setStatus('disconnected', 'Disconnected');
+                    connectBtn.style.display = 'block';
+                }
+                if (captureInterval) {
+                    clearInterval(captureInterval);
+                    cancelAnimationFrame(captureInterval);
+                }
+            };
+            
+            ws.onerror = (e) => {
+                log('Error occurred');
+                console.error(e);
+            };
+        }
+
+        shareBtn.addEventListener('click', startCapture);
+        connectBtn.addEventListener('click', connect);
+        
+        // Auto connect on load
+        connect();
+    </script>
+</body>
+</html>

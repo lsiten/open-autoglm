@@ -1,0 +1,95 @@
+{
+  "common": {
+    "loading": "加载中...",
+    "cancel": "取消",
+    "save": "保存更改",
+    "stop": "停止",
+    "got_it": "知道了"
+  },
+  "sidebar": {
+    "devices": "设备列表",
+    "no_devices": "未检测到设备",
+    "connect_guide_hint": "点击查看连接指南",
+    "add_device": "添加新设备",
+    "configuration": "配置",
+    "model_settings": "模型设置",
+    "connected": "已连接服务器",
+    "disconnected": "服务器未连接"
+  },
+  "topbar": {
+    "current_session": "当前会话",
+    "chat": "对话",
+    "debug": "调试"
+  },
+  "chat": {
+    "ready_title": "准备就绪",
+    "ready_subtitle": "在下方输入指令以控制 {device}",
+    "ready_subtitle_no_device": "请选择设备并输入指令以开始",
+    "input_placeholder": "输入指令...",
+    "select_device_placeholder": "← 请先选择设备",
+    "reasoning_chain": "推理链",
+    "action_executed": "执行动作",
+    "error_start_task": "任务启动失败"
+  },
+  "mirror": {
+    "title": "设备镜像",
+    "waiting_signal": "等待信号中"
+  },
+  "settings": {
+    "title": "Agent 配置",
+    "provider": "模型提供商",
+    "base_url": "模型 API 地址 (Base URL)",
+    "model_name": "模型名称",
+    "api_key": "API 密钥",
+    "local_tip": "本地 vLLM 请留空或填写 'EMPTY'"
+  },
+  "guide": {
+    "title": "连接您的设备",
+    "subtitle": "选择一种连接方式以开始使用 AutoGLM",
+    "prerequisites": "先决条件",
+    "prereq_text": "确保您的设备通过 USB 连接或处于同一 WiFi 网络下。",
+    "usb_option": "选项 1: USB 线缆",
+    "usb_steps": {
+      "step1": "通过 USB 将手机连接到电脑。",
+      "step2": "启用开发者选项 (在设置中连续点击'版本号' 7次)。",
+      "step3": "开启 USB 调试。",
+      "step4": "在手机弹窗中点击'允许'。"
+    },
+    "wifi_option": "选项 2: 无线连接 (WiFi)",
+    "wifi_text": "确保手机和电脑在同一 WiFi 网络。",
+    "wifi_step1": "# 1. 连接 USB 设置端口:",
+    "wifi_step2": "# 2. 拔掉 USB 并连接:",
+    "wifi_tip": "在 设置 > 关于手机 > 状态信息 中查看 IP。",
+    "refresh_list": "刷新设备列表"
+  },
+  "wizard": {
+    "title": "添加新设备",
+    "step_type": "连接类型",
+    "step_usb": "USB 设置",
+    "step_wifi": "WiFi 设置",
+    "btn_next": "下一步",
+    "btn_prev": "上一步",
+    "btn_connect": "连接",
+    "btn_finish": "完成",
+    "type_usb": "USB 连接",
+    "type_wifi": "WiFi 连接",
+    "type_webrtc": "WebRTC 连接",
+    "step_webrtc": "WebRTC 设置",
+    "webrtc_desc": "请使用 AutoGLM App 扫描此二维码。",
+    "webrtc_placeholder": "wss://remote-device.com/socket",
+    "btn_connect_webrtc": "连接流",
+    "usb_instr_1": "请通过 USB 数据线将手机连接到电脑。",
+    "usb_instr_2": "确保开发者选项中已开启 'USB 调试'。",
+    "usb_check": "检查连接",
+    "usb_found": "发现设备！",
+    "usb_not_found": "未检测到设备，请检查数据线和设置。",
+    "wifi_mode_title": "开启无线模式",
+    "wifi_mode_desc": "如果您尚未开启无线调试，请先连接 USB。",
+    "wifi_mode_btn": "通过 USB 开启",
+    "wifi_ip_title": "通过 IP 连接",
+    "wifi_ip_desc": "输入设备的 IP 地址 (例如 192.168.1.5)。",
+    "wifi_ip_placeholder": "192.168.1.x",
+    "connecting": "连接中...",
+    "success": "连接成功！"
+  }
+}

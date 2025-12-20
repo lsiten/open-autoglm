@@ -10,6 +10,7 @@ class DeviceType(Enum):
     ADB = "adb"
     HDC = "hdc"
     IOS = "ios"
+    WEBRTC = "webrtc"
 
 
 class DeviceFactory:
@@ -41,13 +42,23 @@ class DeviceFactory:
                 from phone_agent import hdc
 
                 self._module = hdc
+            elif self.device_type == DeviceType.WEBRTC:
+                from phone_agent import webrtc_client
+                
+                self._module = webrtc_client
             else:
                 raise ValueError(f"Unknown device type: {self.device_type}")
         return self._module
 
-    def get_screenshot(self, device_id: str | None = None, timeout: int = 10):
+    def get_screenshot(self, device_id: str | None = None, timeout: int = 10, **kwargs):
         """Get screenshot from device."""
-        return self.module.get_screenshot(device_id, timeout)
+        return self.module.get_screenshot(device_id, timeout, **kwargs)
+
+    def is_screen_on(self, device_id: str | None = None) -> bool:
+        """Check if screen is on and unlocked."""
+        if hasattr(self.module, "is_screen_on"):
+            return self.module.is_screen_on(device_id)
+        return True # Default assume on if not implemented (e.g. HDC/WebRTC)
 
     def get_current_app(self, device_id: str | None = None) -> str:
         """Get current app name."""
@@ -98,6 +109,10 @@ class DeviceFactory:
     def home(self, device_id: str | None = None, delay: float | None = None):
         """Press home button."""
         return self.module.home(device_id, delay)
+
+    def recent(self, device_id: str | None = None, delay: float | None = None):
+        """Press recent apps button."""
+        return self.module.recent(device_id, delay)
 
     def launch_app(
         self, app_name: str, device_id: str | None = None, delay: float | None = None

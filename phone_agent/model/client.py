@@ -50,18 +50,16 @@ class ModelClient:
         self.config = config or ModelConfig()
         self.client = OpenAI(base_url=self.config.base_url, api_key=self.config.api_key)
 
-    def request(self, messages: list[dict[str, Any]]) -> ModelResponse:
+    def request(self, messages: list[dict[str, Any]], on_token: callable = None) -> ModelResponse:
         """
         Send a request to the model.
 
         Args:
             messages: List of message dictionaries in OpenAI format.
+            on_token: Optional callback function for streaming tokens.
 
         Returns:
             ModelResponse containing thinking and action.
-
-        Raises:
-            ValueError: If the response cannot be parsed.
         """
         # Start timing
         start_time = time.time()
@@ -90,6 +88,7 @@ class ModelClient:
                 continue
             if chunk.choices[0].delta.content is not None:
                 content = chunk.choices[0].delta.content
+                print(f"DEBUG_CHUNK: {content!r}")
                 raw_content += content
 
                 # Record time to first token
@@ -110,7 +109,11 @@ class ModelClient:
                         # Marker found, print everything before it
                         thinking_part = buffer.split(marker, 1)[0]
                         print(thinking_part, end="", flush=True)
+                        if on_token:
+                            on_token(thinking_part)
                         print()  # Print newline after thinking is complete
+                        if on_token:
+                            on_token("\n")
                         in_action_phase = True
                         marker_found = True
 
@@ -137,6 +140,8 @@ class ModelClient:
                 if not is_potential_marker:
                     # Safe to print the buffer
                     print(buffer, end="", flush=True)
+                    if on_token:
+                        on_token(buffer)
                     buffer = ""
 
         # Calculate total time

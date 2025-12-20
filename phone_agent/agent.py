@@ -22,6 +22,7 @@ class AgentConfig:
     lang: str = "cn"
     system_prompt: str | None = None
     verbose: bool = True
+    installed_apps: list[dict[str, Any]] | None = None
 
     def __post_init__(self):
         if self.system_prompt is None:
@@ -109,7 +110,7 @@ class PhoneAgent:
 
         return "Max steps reached"
 
-    def step(self, task: str | None = None) -> StepResult:
+    def step(self, task: str | None = None, on_token: Callable[[str], None] = None) -> StepResult:
         """
         Execute a single step of the agent.
 
@@ -117,6 +118,7 @@ class PhoneAgent:
 
         Args:
             task: Task description (only needed for first step).
+            on_token: Callback for streaming tokens.
 
         Returns:
             StepResult with step details.
@@ -126,7 +128,7 @@ class PhoneAgent:
         if is_first and not task:
             raise ValueError("Task is required for the first step")
 
-        return self._execute_step(task, is_first)
+        return self._execute_step(task, is_first, on_token=on_token)
 
     def reset(self) -> None:
         """Reset the agent state for a new task."""
@@ -134,7 +136,7 @@ class PhoneAgent:
         self._step_count = 0
 
     def _execute_step(
-        self, user_prompt: str | None = None, is_first: bool = False
+        self, user_prompt: str | None = None, is_first: bool = False, on_token: Callable[[str], None] = None
     ) -> StepResult:
         """Execute a single step of the agent loop."""
         self._step_count += 1
@@ -150,7 +152,9 @@ class PhoneAgent:
                 MessageBuilder.create_system_message(self.agent_config.system_prompt)
             )
 
-            screen_info = MessageBuilder.build_screen_info(current_app)
+            screen_info = MessageBuilder.build_screen_info(
+                current_app, installed_apps=self.agent_config.installed_apps
+            )
             text_content = f"{user_prompt}\n\n{screen_info}"
 
             self._context.append(
@@ -159,7 +163,9 @@ class PhoneAgent:
                 )
             )
         else:
-            screen_info = MessageBuilder.build_screen_info(current_app)
+            screen_info = MessageBuilder.build_screen_info(
+                current_app, installed_apps=self.agent_config.installed_apps
+            )
             text_content = f"** Screen Info **\n\n{screen_info}"
 
             self._context.append(
@@ -174,7 +180,7 @@ class PhoneAgent:
             print("\n" + "=" * 50)
             print(f"💭 {msgs['thinking']}:")
             print("-" * 50)
-            response = self.model_client.request(self._context)
+            response = self.model_client.request(self._context, on_token=on_token)
         except Exception as e:
             if self.agent_config.verbose:
                 traceback.print_exc()
@@ -207,7 +213,7 @@ class PhoneAgent:
         # Execute action
         try:
             result = self.action_handler.execute(
-                action, screenshot.width, screenshot.height
+                action, screenshot.width, screenshot.height, current_app=current_app
             )
         except Exception as e:
             if self.agent_config.verbose:
