@@ -3,6 +3,7 @@ import asyncio
 import traceback
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any
 from phone_agent.agent import PhoneAgent, AgentConfig, StepResult
 from phone_agent.model import ModelConfig
@@ -10,14 +11,17 @@ from phone_agent.device_factory import get_device_factory, set_device_type, Devi
 from .device_manager import device_manager
 from .task_manager import task_manager, AgentTask
 from .stream_manager import stream_manager
+from .screen_streamer import screen_streamer
 
 class AgentRunner:
     _instance = None
     
     def __init__(self):
-        self.active_tasks: Dict[str, Dict[str, Any]] = {} # task_id -> {thread, stop_event}
+        self.active_tasks: Dict[str, Dict[str, Any]] = {} # task_id -> {thread, stop_event, screen_change_event}
         self.pending_interactions: Dict[str, Dict[str, Any]] = {} # task_id -> {event, response}
         self.main_loop = None
+        # Thread pool for handling screen change triggered detections
+        self.detection_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="task-detection")
         # Default config
         self.base_url = "http://localhost:8080/v1"
         self.model_name = "autoglm-phone-9b"
@@ -238,29 +242,72 @@ class AgentRunner:
             pass
 
         stop_event = threading.Event()
+        screen_change_event = threading.Event()  # Event to trigger immediate check on screen change
+        detection_lock = threading.Lock()  # Lock to prevent concurrent detections for the same task
+        
+        # Register screen change listener for background tasks
+        def on_screen_change():
+            if task_id in self.active_tasks and task.type == 'background':
+                # Trigger detection in a separate thread to avoid blocking screen capture
+                screen_change_event.set()
+                # Submit detection execution to thread pool
+                self.detection_executor.submit(self._trigger_detection, task_id)
+        
+        if task.type == 'background':
+            screen_streamer.register_screen_change_listener(on_screen_change)
+        
         thread = threading.Thread(
             target=self._run_agent_loop,
-            args=(task, stop_event, prompt_override, installed_apps)
+            args=(task, stop_event, prompt_override, installed_apps, screen_change_event)
         )
-        self.active_tasks[task_id] = {"thread": thread, "stop_event": stop_event}
+        self.active_tasks[task_id] = {
+            "thread": thread, 
+            "stop_event": stop_event,
+            "screen_change_event": screen_change_event,
+            "screen_change_callback": on_screen_change,
+            "detection_lock": detection_lock
+        }
         thread.start()
         task_manager.update_status(task_id, "running")
         self._emit_status(task_id, "running")
         return True, "Task started"
+    
+    def _trigger_detection(self, task_id: str):
+        """Trigger detection for a background task in a separate thread."""
+        if task_id not in self.active_tasks:
+            return
+        
+        task_data = self.active_tasks[task_id]
+        detection_lock = task_data.get("detection_lock")
+        
+        # Use lock to prevent concurrent detections
+        if detection_lock and detection_lock.acquire(blocking=False):
+            try:
+                # The actual detection will be handled by the main task loop
+                # This just ensures the event is set and logged
+                self._emit_log(task_id, "info", "Screen change detected, queuing detection...")
+            finally:
+                detection_lock.release()
 
     def stop_task(self, task_id: str = None):
-        # ... existing ...
         if task_id:
             if task_id in self.active_tasks:
-                self.active_tasks[task_id]["stop_event"].set()
+                task_data = self.active_tasks[task_id]
+                task_data["stop_event"].set()
+                # Unregister screen change listener
+                if "screen_change_callback" in task_data:
+                    screen_streamer.unregister_screen_change_listener(task_data["screen_change_callback"])
                 return True
             return False
         else:
             for tid, data in self.active_tasks.items():
                 data["stop_event"].set()
+                # Unregister screen change listener
+                if "screen_change_callback" in data:
+                    screen_streamer.unregister_screen_change_listener(data["screen_change_callback"])
             return True
 
-    def _run_agent_loop(self, task: AgentTask, stop_event: threading.Event, prompt_override: str = None, installed_apps: list = None):
+    def _run_agent_loop(self, task: AgentTask, stop_event: threading.Event, prompt_override: str = None, installed_apps: list = None, screen_change_event: threading.Event = None):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
@@ -317,26 +364,81 @@ class AgentRunner:
             result = agent.step(final_prompt, on_token=on_token)
             self._handle_step_result(task.id, result)
             
-            while not result.finished and step_count < max_steps and not stop_event.is_set():
-                step_count += 1
-                self._emit_log(task.id, "info", f"Step {step_count}...")
-                
-                # For background monitoring, we might need a delay?
-                if task.type == 'background':
-                    time.sleep(2) # Wait a bit between steps
-                
-                result = agent.step(on_token=on_token)
-                self._handle_step_result(task.id, result)
+            # For background tasks, run in a continuous loop
+            if task.type == 'background':
+                check_interval = 30  # Check every 30 seconds
+                while not stop_event.is_set():
+                    step_count = 0
+                    # Run one detection cycle
+                    while not result.finished and step_count < max_steps and not stop_event.is_set():
+                        step_count += 1
+                        self._emit_log(task.id, "info", f"Step {step_count}...")
+                        
+                        result = agent.step(on_token=on_token)
+                        self._handle_step_result(task.id, result)
+                    
+                    if stop_event.is_set():
+                        break
+                    
+                    # If task finished (found something to do), log it
+                    if result.finished:
+                        self._emit_log(task.id, "success", f"Task cycle completed: {result.message}")
+                        # Reset for next cycle
+                        result.finished = False
+                    
+                    # Wait before next check cycle, but also listen for screen changes
+                    self._emit_log(task.id, "info", f"Waiting for screen change or {check_interval} seconds before next check...")
+                    # Wait in smaller intervals to allow stop_event and screen_change_event to be checked
+                    waited = 0
+                    screen_changed = False
+                    while waited < check_interval and not stop_event.is_set():
+                        # Check for screen change every second
+                        if screen_change_event and screen_change_event.is_set():
+                            screen_change_event.clear()
+                            screen_changed = True
+                            self._emit_log(task.id, "info", "Screen change detected! Triggering immediate check...")
+                            break
+                        time.sleep(1)
+                        waited += 1
+                    
+                    if stop_event.is_set():
+                        break
+                    
+                    # Start new detection cycle (either triggered by screen change or timeout)
+                    # Use lock to ensure detection runs in a controlled manner in separate thread context
+                    detection_lock = self.active_tasks.get(task.id, {}).get("detection_lock")
+                    if detection_lock:
+                        detection_lock.acquire()
+                    
+                    try:
+                        if screen_changed:
+                            self._emit_log(task.id, "info", "Starting detection cycle due to screen change...")
+                        else:
+                            self._emit_log(task.id, "info", "Starting periodic detection cycle...")
+                        result = agent.step(final_prompt, on_token=on_token)
+                        self._handle_step_result(task.id, result)
+                    finally:
+                        if detection_lock:
+                            detection_lock.release()
+            else:
+                # For chat tasks, run normally
+                while not result.finished and step_count < max_steps and not stop_event.is_set():
+                    step_count += 1
+                    self._emit_log(task.id, "info", f"Step {step_count}...")
+                    
+                    result = agent.step(on_token=on_token)
+                    self._handle_step_result(task.id, result)
             
             if stop_event.is_set():
                  self._emit_log(task.id, "warn", "Task stopped by user.")
                  task_manager.update_status(task.id, "stopped")
                  self._emit_status(task.id, "stopped")
-            elif result.finished:
+            elif task.type != 'background' and result.finished:
+                 # Only mark as completed for non-background tasks
                  self._emit_log(task.id, "success", f"Task completed: {result.message}")
                  task_manager.update_status(task.id, "completed")
                  self._emit_status(task.id, "completed")
-            else:
+            elif task.type != 'background':
                  self._emit_log(task.id, "warn", "Max steps reached.")
                  task_manager.update_status(task.id, "stopped")
                  self._emit_status(task.id, "stopped")
@@ -349,6 +451,10 @@ class AgentRunner:
             self._emit_status(task.id, "error")
         finally:
             if task.id in self.active_tasks:
+                task_data = self.active_tasks[task.id]
+                # Unregister screen change listener
+                if "screen_change_callback" in task_data:
+                    screen_streamer.unregister_screen_change_listener(task_data["screen_change_callback"])
                 del self.active_tasks[task.id]
             loop.close()
 

@@ -148,7 +148,13 @@
     "role": "Role (System Prompt)",
     "role_placeholder": "You are a monitoring agent...",
     "details": "Task Details",
-    "details_placeholder": "Monitor the battery level and notify me if below 20%..."
+    "details_placeholder": "Monitor the battery level and notify me if below 20%...",
+    "start": "Start",
+    "pause": "Pause",
+    "no_logs": "No logs yet",
+    "start_task_to_see_logs": "Start the task to see execution logs",
+    "cannot_send_message_to_background_task": "Cannot send messages to background tasks. Use task management buttons to start/pause.",
+    "continuous_monitoring": "Continuous monitoring task - runs periodically to check for conditions"
   },
   "permissions": {
     "title": "Sensitive Actions Permission",
@@ -182,7 +188,8 @@
     "failed_load_messages": "Failed to load messages",
     "failed_fetch_apps": "Failed to fetch device apps",
     "failed_send_interaction": "Failed to send interaction response",
-    "failed_start_task": "Failed to start task"
+    "failed_start_task": "Failed to start task",
+    "failed_stop_task": "Failed to stop task"
   },
   "success": {
     "device_removed": "Device removed",
@@ -194,7 +201,8 @@
     "webrtc_connected": "WebRTC Device Connected!",
     "config_saved": "Configuration Saved",
     "quality_set": "Quality set to {quality}",
-    "task_stopped": "Task Stopped"
+    "task_stopped": "Task Stopped",
+    "task_started": "Task Started"
   },
   "debug": {
     "session_prefix": "Session ",

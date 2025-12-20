@@ -148,7 +148,13 @@
     "role": "役割 (システムプロンプト)",
     "role_placeholder": "あなたは監視エージェントです...",
     "details": "タスクの詳細",
-    "details_placeholder": "バッテリーレベルを監視し、20% 未満の場合に通知します..."
+    "details_placeholder": "バッテリーレベルを監視し、20% 未満の場合に通知します...",
+    "start": "開始",
+    "pause": "一時停止",
+    "no_logs": "ログがありません",
+    "start_task_to_see_logs": "タスクを開始して実行ログを確認してください",
+    "cannot_send_message_to_background_task": "バックグラウンドタスクにメッセージを送信できません。タスク管理ボタンを使用して開始/一時停止してください。",
+    "continuous_monitoring": "継続的な監視タスク - 定期的に実行して条件をチェック"
   },
   "permissions": {
     "title": "機密操作の権限",
@@ -182,7 +188,8 @@
     "failed_load_messages": "メッセージの読み込みに失敗しました",
     "failed_fetch_apps": "デバイスアプリの取得に失敗しました",
     "failed_send_interaction": "インタラクション応答の送信に失敗しました",
-    "failed_start_task": "タスクの開始に失敗しました"
+    "failed_start_task": "タスクの開始に失敗しました",
+    "failed_stop_task": "タスクの停止に失敗しました"
   },
   "success": {
     "device_removed": "デバイスが削除されました",
@@ -194,7 +201,8 @@
     "webrtc_connected": "WebRTC デバイスが接続されました！",
     "config_saved": "設定が保存されました",
     "quality_set": "品質が {quality} に設定されました",
-    "task_stopped": "タスクが停止されました"
+    "task_stopped": "タスクが停止されました",
+    "task_started": "タスクが開始されました"
   },
   "debug": {
     "session_prefix": "セッション ",

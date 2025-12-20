@@ -142,7 +142,13 @@
     "role": "角色 (系统提示词)",
     "role_placeholder": "你是一个监控助手...",
     "details": "任务详情",
-    "details_placeholder": "监控电量，低于20%时提醒我..."
+    "details_placeholder": "监控电量，低于20%时提醒我...",
+    "start": "启动",
+    "pause": "暂停",
+    "no_logs": "暂无日志",
+    "start_task_to_see_logs": "启动任务以查看执行日志",
+    "cannot_send_message_to_background_task": "无法向后台任务发送消息。请使用任务管理按钮来启动/暂停任务。",
+    "continuous_monitoring": "持续监控任务 - 定期运行以检测条件"
   },
   "permissions": {
     "title": "敏感操作权限",
@@ -176,7 +182,8 @@
     "failed_load_messages": "加载消息失败",
     "failed_fetch_apps": "获取应用列表失败",
     "failed_send_interaction": "发送交互响应失败",
-    "failed_start_task": "启动任务失败"
+    "failed_start_task": "启动任务失败",
+    "failed_stop_task": "停止任务失败"
   },
   "success": {
     "device_removed": "设备已移除",
@@ -188,7 +195,8 @@
     "webrtc_connected": "WebRTC 设备已连接！",
     "config_saved": "配置已保存",
     "quality_set": "画质已设置为 {quality}",
-    "task_stopped": "任务已停止"
+    "task_stopped": "任务已停止",
+    "task_started": "任务已启动"
   },
   "debug": {
     "session_prefix": "会话 ",

@@ -212,6 +212,35 @@
                 </el-button>
              </el-tooltip>
 
+             <!-- Task Management Buttons (Only for Background Tasks) -->
+             <template v-if="isBackgroundTask && activeTaskId">
+                <el-button 
+                   v-if="activeTask?.status !== 'running'" 
+                   type="success" 
+                   size="small" 
+                   round 
+                   @click="startBackgroundTask"
+                   :loading="startingTask"
+                >
+                   <el-icon class="mr-1"><VideoPlay /></el-icon> {{ t('task.start') }}
+                </el-button>
+                <el-button 
+                   v-if="activeTask?.status === 'running'" 
+                   type="warning" 
+                   size="small" 
+                   round 
+                   @click="stopTask"
+                   :loading="stoppingTask"
+                >
+                   <el-icon class="mr-1"><VideoPause /></el-icon> {{ t('task.pause') }}
+                </el-button>
+             </template>
+
+             <!-- Stop Button for Chat Sessions -->
+             <el-button v-if="!isBackgroundTask && agentStatus === 'running'" type="danger" size="small" round @click="stopTask">
+                <el-icon class="mr-1"><VideoPause /></el-icon> {{ t('common.stop') }}
+             </el-button>
+
              <!-- Language Switcher -->
              <el-dropdown @command="(lang: string) => locale = lang">
                 <span class="text-xs text-gray-400 hover:text-white cursor-pointer flex items-center">
@@ -226,10 +255,6 @@
                    </el-dropdown-menu>
                 </template>
              </el-dropdown>
-
-             <el-button v-if="agentStatus === 'running'" type="danger" size="small" round @click="stopTask">
-                <el-icon class="mr-1"><VideoPause /></el-icon> {{ t('common.stop') }}
-             </el-button>
           </div>
        </div>
 
@@ -294,11 +319,18 @@
              </div>
           </div>
 
-          <!-- State 2: Device Connected but Empty Chat -->
-          <div v-else-if="chatHistory.length === 0" class="h-full flex flex-col items-center justify-center text-gray-600 opacity-50 select-none">
+          <!-- State 2: Device Connected but Empty Chat (Only for Chat Sessions) -->
+          <div v-else-if="chatHistory.length === 0 && !isBackgroundTask" class="h-full flex flex-col items-center justify-center text-gray-600 opacity-50 select-none">
              <el-icon :size="64" class="mb-4"><ChatDotRound /></el-icon>
              <p class="text-lg font-medium">{{ t('chat.ready_title') }}</p>
              <p class="text-sm">{{ activeDeviceId ? t('chat.ready_subtitle', { device: activeDeviceId }) : t('chat.ready_subtitle_no_device') }}</p>
+          </div>
+
+          <!-- State 2b: Background Task Empty Logs -->
+          <div v-else-if="chatHistory.length === 0 && isBackgroundTask" class="h-full flex flex-col items-center justify-center text-gray-600 opacity-50 select-none">
+             <el-icon :size="64" class="mb-4"><Monitor /></el-icon>
+             <p class="text-lg font-medium">{{ t('task.no_logs') }}</p>
+             <p class="text-sm">{{ t('task.start_task_to_see_logs') }}</p>
           </div>
 
           <!-- State 3: Active Chat History -->
@@ -398,8 +430,8 @@
           </div>
        </div>
 
-       <!-- Input Area -->
-       <div class="p-4 sm:p-6 bg-[#0f1115] border-t border-gray-800 z-20 shrink-0">
+       <!-- Input Area (Only for Chat Sessions) -->
+       <div v-if="!isBackgroundTask" class="p-4 sm:p-6 bg-[#0f1115] border-t border-gray-800 z-20 shrink-0">
           <div class="relative max-w-4xl mx-auto w-full">
              <!-- Toolbar & Preview (Unchanged) -->
              <div class="mb-3 flex flex-col gap-2">
@@ -805,8 +837,17 @@ const devices = ref<any[]>([])
 const activeDeviceId = ref('')
 const loadingDevices = ref(false)
 const sending = ref(false)
-const agentStatus = ref('idle')
+// Status management: store status per task/session ID
+const taskStatuses = ref<Record<string, string>>({}) // taskId/sessionId -> status
+const startingTask = ref(false)
+const stoppingTask = ref(false)
 const chatHistory = ref<any[]>([])
+
+// Computed status for current active task/session
+const agentStatus = computed(() => {
+    if (!activeTaskId.value) return 'idle'
+    return taskStatuses.value[activeTaskId.value] || 'idle'
+})
 const latestScreenshot = ref('')
 const wsConnected = ref(false)
 const wsError = ref('')
@@ -925,6 +966,9 @@ const showEditTaskDialog = ref(false)
 const editTaskNameValue = ref('')
 const taskToEdit = ref<any>(null)
 
+// Task Log Refresh Interval
+const taskLogRefreshInterval = ref<NodeJS.Timeout | null>(null)
+
 // --- Input Enhancements ---
 const availableApps = ref<Array<{name: string, package?: string, type: string}>>([])
 const showAppSuggestions = ref(false)
@@ -960,6 +1004,10 @@ const filteredChatHistory = computed(() => chatHistory.value)
 const activeTask = computed(() => {
     return sessions.value.find(s => s.id === activeTaskId.value) || 
            backgroundTasks.value.find(t => t.id === activeTaskId.value)
+})
+
+const isBackgroundTask = computed(() => {
+    return activeTask.value?.type === 'background'
 })
 
 // --- Methods ---
@@ -1085,6 +1133,12 @@ const fetchData = async () => {
     try {
         const res = await api.get(`/tasks/${activeDeviceId.value}`)
         backgroundTasks.value = res.data.filter((t: any) => t.type === 'background')
+        // Update statuses for background tasks
+        for (const task of backgroundTasks.value) {
+            if (task.status) {
+                taskStatuses.value[task.id] = task.status
+            }
+        }
     } catch (e) {
         console.error('Failed to fetch tasks', e)
         backgroundTasks.value = []
@@ -1160,36 +1214,64 @@ const createTask = async () => {
             showTaskDialog.value = false
             await fetchData() // Refresh lists
             selectTask(res.data.task)
-            
-            // Start immediately
-            await api.post(`/tasks/${res.data.task.id}/start`)
-            fetchData()
+            // Don't start automatically - let user start it manually
         } catch (e: any) {
             ElMessage.error(e.response?.data?.detail || t('error.failed_create_task'))
         }
     }
 }
 
+const refreshTaskLogs = async () => {
+    if (!activeTaskId.value || !isBackgroundTask.value) return
+    try {
+        const res = await api.get(`/tasks/detail/${activeTaskId.value}`)
+        const details = res.data.task
+        chatHistory.value = convertLogsToChat(details.logs)
+        if (details.details) {
+            // Check if details already in history
+            const hasDetails = chatHistory.value.some((msg: any) => msg.role === 'user' && msg.content === details.details)
+            if (!hasDetails) {
+                chatHistory.value.unshift({ role: 'user', content: details.details })
+            }
+        }
+        scrollToBottom()
+    } catch (e) {
+        console.error('Failed to refresh task logs', e)
+    }
+}
+
 const selectTask = async (task: any) => {
+    // Clear previous interval if exists
+    if (taskLogRefreshInterval.value) {
+        clearInterval(taskLogRefreshInterval.value)
+        taskLogRefreshInterval.value = null
+    }
+    
     activeTaskId.value = task.id
     chatHistory.value = []
     hasMoreMessages.value = true
+    
+    // Initialize status if not exists
+    if (!taskStatuses.value[task.id]) {
+        if (task.type === 'background' && task.status) {
+            taskStatuses.value[task.id] = task.status
+        } else {
+            taskStatuses.value[task.id] = 'idle'
+        }
+    }
     
     if (task.type === 'chat') {
         // Load from DB (Paged)
         await loadMessages(task.id)
     } else {
         // Load from Backend
-        try {
-            const res = await api.get(`/tasks/detail/${task.id}`)
-            const details = res.data.task
-            chatHistory.value = convertLogsToChat(details.logs)
-            if (details.details) {
-                chatHistory.value.unshift({ role: 'user', content: details.details })
+        await refreshTaskLogs()
+        // For background tasks, set up periodic refresh
+        taskLogRefreshInterval.value = setInterval(() => {
+            if (isBackgroundTask.value && activeTaskId.value === task.id) {
+                refreshTaskLogs()
             }
-        } catch (e) {
-            console.error(e)
-        }
+        }, 5000) // Refresh every 5 seconds
     }
     scrollToBottom()
 }
@@ -1285,6 +1367,8 @@ const deleteTask = async (task: any) => {
     if (task.type === 'chat') {
         await db.deleteSession(task.id)
         sessions.value = sessions.value.filter(s => s.id !== task.id)
+        // Remove status
+        delete taskStatuses.value[task.id]
         if (activeTaskId.value === task.id) {
             activeTaskId.value = null
             chatHistory.value = []
@@ -1294,6 +1378,8 @@ const deleteTask = async (task: any) => {
         try {
             await api.delete(`/tasks/${task.id}`)
             backgroundTasks.value = backgroundTasks.value.filter(t => t.id !== task.id)
+            // Remove status
+            delete taskStatuses.value[task.id]
             if (activeTaskId.value === task.id) {
                 activeTaskId.value = null
                 chatHistory.value = []
@@ -1481,6 +1567,12 @@ const handleCardInput = async (msg: any) => {
 
 const sendMessage = async () => {
   if (!input.value || !activeDeviceId.value || !activeTaskId.value) return
+  
+  // Prevent sending messages for background tasks
+  if (isBackgroundTask.value) {
+      ElMessage.warning(t('task.cannot_send_message_to_background_task'))
+      return
+  }
 
   // Debug/Test Commands for UI Cards
   if (input.value === '/debug-confirm') {
@@ -1579,7 +1671,9 @@ const sendMessage = async () => {
         prompt,
         installed_apps: availableApps.value.map(a => ({ name: a.name, package: a.package }))
     })
-    agentStatus.value = 'running'
+    if (activeTaskId.value) {
+        taskStatuses.value[activeTaskId.value] = 'running'
+    }
   } catch (err: any) {
     const errorMsg = err.response?.data?.detail || t('error.failed_start_task')
     ElMessage.error(errorMsg)
@@ -1592,14 +1686,52 @@ const sendMessage = async () => {
   }
 }
 
-const stopTask = async () => {
-  if (activeTaskId.value) {
-      await api.post(`/tasks/${activeTaskId.value}/stop`)
-  } else {
-      await api.post('/agent/stop')
+const startBackgroundTask = async () => {
+  if (!activeTaskId.value || !activeDeviceId.value) return
+  
+  startingTask.value = true
+  try {
+    // Ensure apps are fetched so we can pass them to the agent
+    if (availableApps.value.length === 0 && activeDeviceId.value) {
+        await fetchDeviceApps(activeDeviceId.value)
+    }
+    
+    await api.post(`/tasks/${activeTaskId.value}/start`, {
+        installed_apps: availableApps.value.map(a => ({ name: a.name, package: a.package }))
+    })
+    if (activeTaskId.value) {
+        taskStatuses.value[activeTaskId.value] = 'running'
+    }
+    await fetchData() // Refresh task status
+    ElMessage.success(t('success.task_started'))
+  } catch (err: any) {
+    const errorMsg = err.response?.data?.detail || t('error.failed_start_task')
+    ElMessage.error(errorMsg)
+  } finally {
+    startingTask.value = false
   }
-  agentStatus.value = 'idle'
-  ElMessage.warning(t('success.task_stopped'))
+}
+
+const stopTask = async () => {
+  stoppingTask.value = true
+  try {
+    if (activeTaskId.value) {
+        await api.post(`/tasks/${activeTaskId.value}/stop`)
+        taskStatuses.value[activeTaskId.value] = 'idle'
+    } else {
+        await api.post('/agent/stop')
+        // Clear all statuses if stopping without active task
+        taskStatuses.value = {}
+    }
+    if (isBackgroundTask.value) {
+        await fetchData() // Refresh task status
+    }
+    ElMessage.warning(t('success.task_stopped'))
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.detail || t('error.failed_stop_task'))
+  } finally {
+    stoppingTask.value = false
+  }
 }
 
 // --- Wizard Methods ---
@@ -1841,10 +1973,17 @@ const connectWS = () => {
 const handleWSMessage = (data: any) => {
   if (data.type === 'log') {
     if (activeTaskId.value && data.taskId && data.taskId !== activeTaskId.value) {
-        // Log is for another task (background)
+        // Log is for another task, ignore
         return
     }
-    handleLog(data)
+    // For background tasks, we need to handle logs differently
+    if (isBackgroundTask.value && data.taskId === activeTaskId.value) {
+        handleLog(data)
+        // Also refresh task details to get updated logs
+        refreshTaskLogs()
+    } else {
+        handleLog(data)
+    }
   } else if (data.type === 'screenshot') {
     // Legacy support or direct base64
     frameCount++
@@ -1859,10 +1998,21 @@ const handleWSMessage = (data: any) => {
     img.onload = () => { isLandscape.value = img.width > img.height }
     img.src = latestScreenshot.value
   } else if (data.type === 'status') {
-    agentStatus.value = data.data.state
-    if (agentStatus.value !== 'running') {
-       const lastMsg = chatHistory.value[chatHistory.value.length - 1]
-       if (lastMsg && lastMsg.isThinking) lastMsg.isThinking = false
+    // Update status for the specific task/session
+    if (data.taskId) {
+        taskStatuses.value[data.taskId] = data.data.state
+        
+        // Only update UI if this is the currently active task/session
+        if (data.taskId === activeTaskId.value) {
+            if (data.data.state !== 'running') {
+                const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+                if (lastMsg && lastMsg.isThinking) lastMsg.isThinking = false
+            }
+            // Refresh task status for background tasks
+            if (isBackgroundTask.value) {
+                fetchData()
+            }
+        }
     }
   } else if (data.type === 'interaction') {
       const interactionMsg: any = {
@@ -2029,51 +2179,52 @@ const tryFetchFrame = async () => {
 
 const handleLog = (data: any) => {
   const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+  const isBackground = isBackgroundTask.value
   
   if (data.level === 'thought') {
     if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
       lastMsg.thought += data.message
-      if (lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
+      if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
     } else {
       const newMsg: any = { role: 'agent', thought: data.message, isThinking: true, sessionId: activeTaskId.value }
       chatHistory.value.push(newMsg)
-      db.addMessage(newMsg).then(id => newMsg.id = id)
+      if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
     }
   } else if (data.level === 'success') {
     if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
       lastMsg.isThinking = false
       lastMsg.content = data.message 
-      if (lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, content: lastMsg.content })
+      if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, content: lastMsg.content })
     } else {
       const newMsg: any = { role: 'agent', content: data.message, sessionId: activeTaskId.value }
       chatHistory.value.push(newMsg)
-      db.addMessage(newMsg).then(id => newMsg.id = id)
+      if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
     }
   } else if (data.level === 'info') {
        if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
          lastMsg.thought += (lastMsg.thought ? '\n' : '') + '[INFO] ' + data.message
-         if (lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
+         if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
        }
   } else if (data.level === 'action') {
       if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
           lastMsg.action = data.message
           lastMsg.isThinking = false
-          if (lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, action: data.message })
+          if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, action: data.message })
       } else {
           const newMsg: any = { role: 'agent', action: data.message, sessionId: activeTaskId.value }
           chatHistory.value.push(newMsg)
-          db.addMessage(newMsg).then(id => newMsg.id = id)
+          if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       }
       forceRefreshFrame()
   } else if (data.level === 'error') {
       ElMessage.error(data.message)
       const errorMsg: any = { role: 'agent', content: `${t('common.error_prefix')}${data.message}`, sessionId: activeTaskId.value }
       chatHistory.value.push(errorMsg)
-      db.addMessage(errorMsg).then(id => errorMsg.id = id)
+      if (!isBackground) db.addMessage(errorMsg).then(id => errorMsg.id = id)
 
       if (lastMsg && lastMsg.isThinking) {
           lastMsg.isThinking = false
-          if (lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false })
+          if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false })
       }
   }
   
@@ -2114,11 +2265,25 @@ watch(activeDeviceId, (newId) => {
         startStreamLoop() // Start polling
     } else {
         isStreaming.value = false // Stop polling
+        if (taskLogRefreshInterval.value) {
+            clearInterval(taskLogRefreshInterval.value)
+            taskLogRefreshInterval.value = null
+        }
         sessions.value = []
         backgroundTasks.value = []
         activeTaskId.value = null
         chatHistory.value = []
         availableApps.value = []
+        // Clear statuses when device changes
+        taskStatuses.value = {}
+    }
+})
+
+// Clean up interval when task changes
+watch(activeTaskId, (newId, oldId) => {
+    if (oldId && taskLogRefreshInterval.value) {
+        clearInterval(taskLogRefreshInterval.value)
+        taskLogRefreshInterval.value = null
     }
 })
 </script>

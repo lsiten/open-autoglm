@@ -148,7 +148,13 @@
     "role": "역할 (시스템 프롬프트)",
     "role_placeholder": "당신은 모니터링 에이전트입니다...",
     "details": "작업 세부 정보",
-    "details_placeholder": "배터리 수준을 모니터링하고 20% 미만일 때 알림..."
+    "details_placeholder": "배터리 수준을 모니터링하고 20% 미만일 때 알림...",
+    "start": "시작",
+    "pause": "일시 중지",
+    "no_logs": "로그가 없습니다",
+    "start_task_to_see_logs": "작업을 시작하여 실행 로그를 확인하세요",
+    "cannot_send_message_to_background_task": "백그라운드 작업에 메시지를 보낼 수 없습니다. 작업 관리 버튼을 사용하여 시작/일시 중지하세요.",
+    "continuous_monitoring": "지속적인 모니터링 작업 - 주기적으로 실행하여 조건 확인"
   },
   "permissions": {
     "title": "민감한 작업 권한",
@@ -182,7 +188,8 @@
     "failed_load_messages": "메시지 로드 실패",
     "failed_fetch_apps": "장치 앱 가져오기 실패",
     "failed_send_interaction": "상호작용 응답 전송 실패",
-    "failed_start_task": "작업 시작 실패"
+    "failed_start_task": "작업 시작 실패",
+    "failed_stop_task": "작업 중지 실패"
   },
   "success": {
     "device_removed": "장치가 제거되었습니다",
@@ -194,7 +201,8 @@
     "webrtc_connected": "WebRTC 장치가 연결되었습니다!",
     "config_saved": "설정이 저장되었습니다",
     "quality_set": "품질이 {quality}로 설정되었습니다",
-    "task_stopped": "작업이 중지되었습니다"
+    "task_stopped": "작업이 중지되었습니다",
+    "task_started": "작업이 시작되었습니다"
   },
   "debug": {
     "session_prefix": "세션 ",
