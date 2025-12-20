@@ -354,66 +354,96 @@
 
                 <!-- Agent Components -->
                 <template v-else>
-                    <!-- Thought Process (Collapsible) -->
-                    <div v-if="msg.thought" class="mb-2 w-full max-w-xl">
-                       <div class="bg-[#1c2128] border border-gray-700/50 rounded-xl overflow-hidden">
+                    <!-- INFO Message (Distinct Style - Collapsible) -->
+                    <div v-if="msg.isInfo && msg.content" class="mb-2 w-full max-w-xl">
+                       <div class="bg-blue-500/10 border-l-4 border-blue-500 rounded-r-lg overflow-hidden">
                           <div 
-                             class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center justify-between cursor-pointer hover:bg-[#2a3038] transition-colors"
-                             @click="messageCollapseState[index] = { ...messageCollapseState[index], thought: !(messageCollapseState[index]?.thought ?? false) }"
+                             class="px-4 py-3 border-b border-blue-500/20 flex items-center justify-between cursor-pointer hover:bg-blue-500/5 transition-colors"
+                             @click="messageCollapseState[index] = { ...messageCollapseState[index], info: !(messageCollapseState[index]?.info ?? true) }"
                           >
                              <div class="flex items-center gap-2">
-                                <el-icon class="text-amber-500" :class="{ 'is-loading': msg.isThinking }"><Loading v-if="msg.isThinking" /><Cpu v-else /></el-icon>
-                                <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.reasoning_chain') }}</span>
+                                <el-icon class="text-blue-400" :size="14"><InfoFilled /></el-icon>
+                                <span class="text-xs font-medium text-blue-300 uppercase tracking-wide">{{ t('chat.info') || 'Info' }}</span>
                              </div>
-                             <el-icon class="text-gray-500 text-xs transition-transform" :class="{ 'rotate-180': messageCollapseState[index]?.thought ?? false }">
+                             <el-icon class="text-blue-400/60 text-xs transition-transform" :class="{ 'rotate-180': !(messageCollapseState[index]?.info ?? true) }">
                                 <ArrowDown />
                              </el-icon>
                           </div>
                           <div 
-                             v-show="!(messageCollapseState[index]?.thought ?? false)"
-                             class="p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-5 bg-[#0d1117] max-h-64 overflow-y-auto custom-scrollbar"
+                             v-show="!(messageCollapseState[index]?.info ?? true)"
+                             class="px-4 py-3"
                           >
-                             {{ msg.thought }}
+                             <div class="text-sm text-blue-200 font-medium mb-1">{{ msg.content }}</div>
+                             <!-- Screenshot for info messages -->
+                             <div v-if="msg.screenshot" class="mt-2">
+                                <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-blue-500/30 shadow-lg" />
+                             </div>
                           </div>
                        </div>
                     </div>
 
-                    <!-- Screenshot (Collapsible) -->
-                    <div v-if="msg.screenshot" class="mb-2 w-full max-w-xl">
-                       <div class="bg-[#1c2128] border border-gray-700/50 rounded-xl overflow-hidden">
+                    <!-- Screenshot Only (Distinct Style) -->
+                    <div v-else-if="msg.screenshot && !msg.thought && !msg.content && !msg.isInfo" class="mb-2 w-full max-w-xl">
+                       <div class="bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-lg overflow-hidden">
+                          <div class="px-4 py-3">
+                             <div class="flex items-center gap-2 mb-2">
+                                <el-icon class="text-indigo-400"><Picture /></el-icon>
+                                <span class="text-xs font-medium text-indigo-300 uppercase tracking-wide">{{ t('chat.screenshot') }}</span>
+                             </div>
+                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-indigo-500/30 shadow-lg" />
+                          </div>
+                       </div>
+                    </div>
+
+                    <!-- Think/Reasoning (Distinct Style - Independent Message, Default Collapsed) -->
+                    <div v-if="msg.thought && !msg.action && !msg.isAnswer" class="mb-2 w-full max-w-xl">
+                       <div class="bg-amber-500/10 border-l-4 border-amber-500 rounded-r-lg overflow-hidden">
                           <div 
-                             class="bg-[#22272e] px-3 py-2 border-b border-gray-700/50 flex items-center justify-between cursor-pointer hover:bg-[#2a3038] transition-colors"
-                             @click="messageCollapseState[index] = { ...messageCollapseState[index], screenshot: !(messageCollapseState[index]?.screenshot ?? false) }"
+                             class="px-4 py-3 border-b border-amber-500/20 flex items-center justify-between cursor-pointer hover:bg-amber-500/5 transition-colors"
+                             @click="messageCollapseState[index] = { ...messageCollapseState[index], thought: !(messageCollapseState[index]?.thought ?? true) }"
                           >
                              <div class="flex items-center gap-2">
-                                <el-icon class="text-blue-500"><Picture /></el-icon>
-                                <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ t('chat.screenshot') }}</span>
+                                <el-icon class="text-amber-400" :class="{ 'is-loading': msg.isThinking }"><Loading v-if="msg.isThinking" /><Cpu v-else /></el-icon>
+                                <span class="text-xs font-medium text-amber-300 uppercase tracking-wide">{{ t('chat.reasoning_chain') }}</span>
                              </div>
-                             <el-icon class="text-gray-500 text-xs transition-transform" :class="{ 'rotate-180': messageCollapseState[index]?.screenshot ?? false }">
+                             <el-icon class="text-amber-400/60 text-xs transition-transform" :class="{ 'rotate-180': !(messageCollapseState[index]?.thought ?? true) }">
                                 <ArrowDown />
                              </el-icon>
                           </div>
-                          <div v-show="!(messageCollapseState[index]?.screenshot ?? false)" class="p-3 bg-[#0d1117]">
-                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-gray-700/50" />
+                          <div 
+                             v-show="!(messageCollapseState[index]?.thought ?? true)"
+                             class="p-4 text-sm text-amber-100 leading-relaxed max-h-64 overflow-y-auto custom-scrollbar"
+                             v-html="formatThink(msg.thought)"
+                          ></div>
+                          <!-- Screenshot for think messages -->
+                          <div v-if="msg.screenshot && !(messageCollapseState[index]?.thought ?? true)" class="px-4 pb-3">
+                             <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-amber-500/30 shadow-lg" />
                           </div>
                        </div>
                     </div>
 
-                    <!-- Final Response / Message -->
-                    <div v-if="msg.content" class="bg-[#1c2128] text-gray-200 px-5 py-3 rounded-2xl rounded-tl-sm border border-gray-700/50 shadow-sm text-sm leading-relaxed">
-                       {{ msg.content }}
+                    <!-- Answer/Action (Distinct Style - Independent Message) -->
+                    <div v-if="msg.isAnswer || msg.action || (msg.content && !msg.isInfo && !msg.thought && !msg.isThinking)" class="mb-2 w-full max-w-xl">
+                       <div class="bg-green-500/10 border-l-4 border-green-500 rounded-r-lg overflow-hidden">
+                          <div class="px-4 py-3">
+                             <div v-if="msg.action" class="flex items-start gap-3">
+                                <div class="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                                   <el-icon class="text-green-400" :size="14"><Pointer /></el-icon>
+                                </div>
+                                <div class="flex-1">
+                                   <div class="text-[10px] text-green-400 uppercase font-bold mb-1">{{ t('chat.action_executed') }}</div>
+                                   <div class="text-sm text-green-200 font-mono" v-html="formatAnswer(msg.action)"></div>
+                                </div>
+                             </div>
+                             <div v-else-if="msg.content" class="text-sm text-green-200 leading-relaxed" v-html="formatAnswer(msg.content)"></div>
+                             <!-- Screenshot for answer messages -->
+                             <div v-if="msg.screenshot && (msg.action || msg.content)" class="mt-3">
+                                <img :src="msg.screenshot" alt="Screenshot" class="max-w-full h-auto rounded-lg border border-green-500/30 shadow-lg" />
+                             </div>
+                          </div>
+                       </div>
                     </div>
 
-                    <!-- Action Card -->
-                    <div v-if="msg.action" class="mt-2 flex items-center gap-3 bg-[#1c2128] border border-green-900/30 px-3 py-2 rounded-lg max-w-fit">
-                       <div class="w-6 h-6 rounded-full bg-green-900/50 flex items-center justify-center text-green-400">
-                          <el-icon :size="12"><Pointer /></el-icon>
-                       </div>
-                       <div class="flex flex-col">
-                          <span class="text-[10px] text-gray-500 uppercase font-bold">{{ t('chat.action_executed') }}</span>
-                          <span class="text-xs text-green-400 font-mono">{{ msg.action }}</span>
-                       </div>
-                    </div>
 
                     <!-- Interaction: Confirmation/Choice -->
                     <div v-if="msg.type === 'confirm'" class="mt-2 w-full max-w-sm bg-[#1c2128] border border-blue-500/30 rounded-xl overflow-hidden shadow-lg animate-fade-in">
@@ -875,8 +905,92 @@ const startingTask = ref(false)
 const stoppingTask = ref(false)
 const chatHistory = ref<any[]>([])
 
-// Collapse state for messages (key: message index, value: { thought: boolean, screenshot: boolean })
-const messageCollapseState = ref<Record<number, { thought?: boolean, screenshot?: boolean }>>({})
+// Collapse state for messages (key: message index, value: { thought: boolean, screenshot: boolean, info?: boolean })
+// true = collapsed, false = expanded
+// Default: think and info messages are collapsed (true)
+const messageCollapseState = ref<Record<number, { thought?: boolean, screenshot?: boolean, info?: boolean }>>({})
+
+// Escape HTML to prevent XSS
+const escapeHtml = (text: string): string => {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+// Format think/reasoning content (amber theme)
+const formatThink = (thought: string): string => {
+  if (!thought) return ''
+  
+  let formatted = thought
+  
+  // Extract and style <think> tags
+  formatted = formatted.replace(
+    /<think>(.*?)<\/redacted_reasoning>/gs,
+    (match, content) => {
+      const escaped = escapeHtml(content.trim())
+      return `<div class="mb-3 p-3 bg-amber-500/15 border-l-3 border-amber-400 rounded-r text-amber-100 leading-relaxed">${escaped}</div>`
+    }
+  )
+  
+  // Remove <answer> tags from think content (they should be in answer section)
+  formatted = formatted.replace(/<answer>.*?<\/answer>/gs, '')
+  
+  // Style step numbers
+  formatted = formatted.replace(
+    /(Step\s+\d+[\.:]?\s*)(.*?)(?=\n|$|Step\s+\d+)/g,
+    (match, prefix, content) => {
+      const escapedContent = escapeHtml(content.trim())
+      return `<div class="mb-2 flex items-start gap-2"><span class="inline-flex items-center px-2 py-1 bg-amber-500/20 text-amber-300 font-semibold text-[11px] rounded shrink-0">${prefix}</span><span class="text-amber-100 flex-1">${escapedContent}</span></div>`
+    }
+  )
+  
+  // Convert line breaks
+  formatted = formatted.replace(/\n\n+/g, '<br><br>')
+  formatted = formatted.replace(/\n/g, '<br>')
+  
+  // If no special formatting, return as plain text
+  if (formatted === thought) {
+    return escapeHtml(thought).replace(/\n\n+/g, '<br><br>').replace(/\n/g, '<br>')
+  }
+  
+  return formatted
+}
+
+// Format answer/action content (green theme)
+const formatAnswer = (answer: string): string => {
+  if (!answer) return ''
+  
+  let formatted = answer
+  
+  // Extract and style <answer> tags
+  formatted = formatted.replace(
+    /<answer>(.*?)<\/answer>/gs,
+    (match, content) => {
+      const escaped = escapeHtml(content.trim())
+      return `<div class="p-2.5 bg-green-500/15 border-l-3 border-green-400 rounded-r font-mono text-green-200 text-[12px] leading-relaxed">${escaped}</div>`
+    }
+  )
+  
+  // Highlight do(action=...) and finish(message=...) patterns
+  formatted = formatted.replace(
+    /(do\(action=|finish\(message=)([^)]+\))/g,
+    (match) => {
+      const escaped = escapeHtml(match)
+      return `<span class="inline-block px-2 py-1 bg-green-500/25 text-green-200 font-mono rounded text-[12px] font-semibold">${escaped}</span>`
+    }
+  )
+  
+  // Convert line breaks
+  formatted = formatted.replace(/\n\n+/g, '<br><br>')
+  formatted = formatted.replace(/\n/g, '<br>')
+  
+  // If no special formatting, return as plain text
+  if (formatted === answer) {
+    return escapeHtml(answer).replace(/\n\n+/g, '<br><br>').replace(/\n/g, '<br>')
+  }
+  
+  return formatted
+}
 
 // Computed status for current active task/session
 const agentStatus = computed(() => {
@@ -1416,21 +1530,19 @@ const convertLogsToChat = (logs: any[]) => {
                  lastMsg = null
              }
         } else if (log.level === 'action') {
+             // Action/Answer should always be a separate message, not merged with think
+             // Close any thinking message first
              if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
-                 lastMsg.action = log.message
                  lastMsg.isThinking = false
-                 // Update screenshot if provided
-                 if (screenshotData && !lastMsg.screenshot) {
-                     lastMsg.screenshot = screenshotData
-                 }
-             } else {
-                 history.push({ 
-                     role: 'agent', 
-                     action: log.message,
-                     screenshot: screenshotData
-                 })
-                 lastMsg = null
              }
+             // Create a new independent answer/action message
+             history.push({ 
+                 role: 'agent', 
+                 action: log.message,
+                 screenshot: screenshotData,
+                 isAnswer: true  // Mark as answer message
+             })
+             lastMsg = null
         } else if (log.level === 'error') {
              history.push({ 
                  role: 'agent', 
@@ -2261,44 +2373,108 @@ const handleLog = (data: any) => {
   const lastMsg = chatHistory.value[chatHistory.value.length - 1]
   const isBackground = isBackgroundTask.value
   
+  // Prepare screenshot data if present
+  const screenshotData = data.screenshot ? `data:image/jpeg;base64,${data.screenshot}` : null
+  
   if (data.level === 'thought') {
     if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
       lastMsg.thought += data.message
-      if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
+      // Update screenshot if provided
+      if (screenshotData && !lastMsg.screenshot) {
+        lastMsg.screenshot = screenshotData
+      }
+      if (!isBackground && lastMsg.id) {
+        const update: any = { thought: lastMsg.thought }
+        if (screenshotData) update.screenshot = screenshotData
+        db.updateMessage(lastMsg.id, update)
+      }
     } else {
-      const newMsg: any = { role: 'agent', thought: data.message, isThinking: true, sessionId: activeTaskId.value }
+      const newMsg: any = { 
+        role: 'agent', 
+        thought: data.message, 
+        isThinking: true, 
+        sessionId: activeTaskId.value,
+        screenshot: screenshotData
+      }
       chatHistory.value.push(newMsg)
       if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
     }
   } else if (data.level === 'success') {
     if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
       lastMsg.isThinking = false
-      lastMsg.content = data.message 
-      if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, content: lastMsg.content })
+      lastMsg.content = data.message
+      // Update screenshot if provided
+      if (screenshotData && !lastMsg.screenshot) {
+        lastMsg.screenshot = screenshotData
+      }
+      if (!isBackground && lastMsg.id) {
+        const update: any = { isThinking: false, content: lastMsg.content }
+        if (screenshotData) update.screenshot = screenshotData
+        db.updateMessage(lastMsg.id, update)
+      }
     } else {
-      const newMsg: any = { role: 'agent', content: data.message, sessionId: activeTaskId.value }
+      const newMsg: any = { 
+        role: 'agent', 
+        content: data.message, 
+        sessionId: activeTaskId.value,
+        screenshot: screenshotData
+      }
       chatHistory.value.push(newMsg)
       if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
     }
   } else if (data.level === 'info') {
        if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
          lastMsg.thought += (lastMsg.thought ? '\n' : '') + '[INFO] ' + data.message
-         if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { thought: lastMsg.thought })
+         // Update screenshot if provided
+         if (screenshotData && !lastMsg.screenshot) {
+           lastMsg.screenshot = screenshotData
+         }
+         if (!isBackground && lastMsg.id) {
+           const update: any = { thought: lastMsg.thought }
+           if (screenshotData) update.screenshot = screenshotData
+           db.updateMessage(lastMsg.id, update)
+         }
+       } else {
+         // Create a new info message if no thinking message exists
+         // This allows info logs like "Analyzing screen..." to be displayed with screenshots
+         const newMsg: any = { 
+           role: 'agent', 
+           content: data.message, 
+           sessionId: activeTaskId.value,
+           screenshot: screenshotData,
+           isInfo: true  // Mark as info message for styling
+         }
+         chatHistory.value.push(newMsg)
+         if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
        }
   } else if (data.level === 'action') {
+      // Action/Answer should always be a separate message, not merged with think
+      // Close any thinking message first
       if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
-          lastMsg.action = data.message
           lastMsg.isThinking = false
-          if (!isBackground && lastMsg.id) db.updateMessage(lastMsg.id, { isThinking: false, action: data.message })
-      } else {
-          const newMsg: any = { role: 'agent', action: data.message, sessionId: activeTaskId.value }
-          chatHistory.value.push(newMsg)
-          if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
+          if (!isBackground && lastMsg.id) {
+            db.updateMessage(lastMsg.id, { isThinking: false })
+          }
       }
+      // Create a new independent answer/action message
+      const newMsg: any = { 
+        role: 'agent', 
+        action: data.message, 
+        sessionId: activeTaskId.value,
+        screenshot: screenshotData,
+        isAnswer: true  // Mark as answer message
+      }
+      chatHistory.value.push(newMsg)
+      if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       forceRefreshFrame()
   } else if (data.level === 'error') {
       ElMessage.error(data.message)
-      const errorMsg: any = { role: 'agent', content: `${t('common.error_prefix')}${data.message}`, sessionId: activeTaskId.value }
+      const errorMsg: any = { 
+        role: 'agent', 
+        content: `${t('common.error_prefix')}${data.message}`, 
+        sessionId: activeTaskId.value,
+        screenshot: screenshotData
+      }
       chatHistory.value.push(errorMsg)
       if (!isBackground) db.addMessage(errorMsg).then(id => errorMsg.id = id)
 

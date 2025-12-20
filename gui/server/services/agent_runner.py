@@ -476,18 +476,19 @@ class AgentRunner:
             if task_data:
                 device_id = task_data.get("device_id")
                 if device_id:
-                    # Try to get screenshot from screen_streamer first (faster)
+                    # Always try to get screenshot directly from device first
+                    # This ensures we get the most up-to-date screenshot
+                    factory = get_device_factory()
+                    screenshot = factory.get_screenshot(device_id, quality=50, max_width=540)
+                    if screenshot and screenshot.base64_data:
+                        return screenshot.base64_data
+                    # Fallback: try screen_streamer if direct capture fails
                     if screen_streamer.latest_frame:
                         import base64
                         return base64.b64encode(screen_streamer.latest_frame).decode('utf-8')
-                    else:
-                        # Fallback: get screenshot directly from device
-                        factory = get_device_factory()
-                        screenshot = factory.get_screenshot(device_id, quality=50, max_width=540)
-                        if screenshot and screenshot.base64_data:
-                            return screenshot.base64_data
         except Exception as e:
-            # Don't fail if screenshot capture fails
+            # Don't fail if screenshot capture fails, but log for debugging
+            # print(f"[AgentRunner] Failed to get screenshot for task {task_id}: {e}")
             pass
         return None
 
