@@ -298,6 +298,15 @@ class ActionHandler:
         current = getattr(self, 'current_app', '') or ''
         current = current.lower()
         
+        # Install App Check - Check if we're in an app store/market
+        installer_keywords = ["market", "store", "installer", "应用市场", "应用商店", "play store", "app store"]
+        if any(kw in current for kw in installer_keywords):
+            # When in app store, any tap might be an install action
+            # Check permission configuration - will auto-approve if enabled, or request user confirmation if disabled
+            if not self._check_sensitive_permission("install_app", "在应用市场中执行安装操作"):
+                print(f"[Tap Action] Permission denied for app installation in market")
+                return ActionResult(False, True, "用户拒绝了应用安装操作")
+        
         # Payment Check
         if any(app in current for app in ['alipay', 'wallet', 'pay']):
              if not self._check_sensitive_permission("payment", "Perform payment operation"):

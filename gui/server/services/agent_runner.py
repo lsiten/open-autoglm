@@ -69,11 +69,15 @@ class AgentRunner:
         # Check auto-permission
         if permission_key:
             task = task_manager.get_task(task_id)
-            if task:
+            if task and task.device_id:
                 perms = device_manager.get_device_permissions(task.device_id)
-                if perms.get(permission_key, False):
+                auto_approved = perms.get(permission_key, False)
+                self._emit_log(task_id, "debug", f"Permission check for '{permission_key}' on device '{task.device_id}': auto_approved={auto_approved}, perms={perms}")
+                if auto_approved:
                     self._emit_log(task_id, "info", f"Auto-approved sensitive action: {clean_message}")
                     return True
+            else:
+                self._emit_log(task_id, "warn", f"Task not found or device_id missing for permission check: task={task}, device_id={task.device_id if task else None}")
 
         # Need manual confirmation
         self._emit_log(task_id, "warn", f"Waiting for confirmation: {clean_message}")
