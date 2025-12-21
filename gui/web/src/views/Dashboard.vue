@@ -107,7 +107,7 @@
 
                   <!-- Think/Reasoning -->
                   <ThinkMessage
-                    v-if="msg.thought && !msg.action && !msg.isAnswer"
+                    v-if="(msg.thought || msg.isThinking) && !msg.action && !msg.isAnswer"
                     :message="msg"
                     :collapsed="messageCollapseState[index]?.thought ?? true"
                     @toggle="messageCollapseState[index] = { ...messageCollapseState[index], thought: !(messageCollapseState[index]?.thought ?? true) }"
@@ -148,6 +148,12 @@
                     :message="msg"
                     :latest-screenshot="latestScreenshot"
                     @annotation="handleCardAnnotation"
+                  />
+
+                    <!-- Status Message: Long-running task progress -->
+                  <StatusMessage
+                    v-if="msg.type === 'status' && ((msg.statusType && msg.statusType.trim()) && ((msg.status && msg.status.trim()) || (msg.message && msg.message.trim()) || msg.progress !== undefined))"
+                    :message="msg"
                   />
                 </template>
              </div>
@@ -295,6 +301,7 @@ import ErrorMessage from '../components/dashboard/messages/ErrorMessage.vue'
 import ConfirmMessage from '../components/dashboard/messages/ConfirmMessage.vue'
 import InputMessage from '../components/dashboard/messages/InputMessage.vue'
 import ClickAnnotationMessage from '../components/dashboard/messages/ClickAnnotationMessage.vue'
+import StatusMessage from '../components/dashboard/messages/StatusMessage.vue'
 import { formatThink, formatAnswer } from '../utils/messageFormatter'
 import { detectPlatform, availablePlatforms } from '../utils/platformDetector'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -435,21 +442,25 @@ const {
   },
   (data: any) => {
     // onStatusMessage - Long-running task progress (e.g., installation)
+    console.log('[onStatusMessage] Received status data:', data)
     if (data.taskId === activeTaskId.value && data.data) {
       const statusMsg: any = {
         role: 'agent',
         type: 'status',
-        statusType: data.data.status_type,
+        statusType: data.data.status_type || '',
         status: data.data.status || '',
         message: data.data.message || '',
         app: data.data.app || '',
-        progress: data.data.progress || null,
+        progress: data.data.progress !== undefined ? data.data.progress : null,
         sessionId: activeTaskId.value,
         timestamp: Date.now()
       }
+      console.log('[onStatusMessage] Created status message:', statusMsg)
       chatHistory.value.push(statusMsg)
       db.addMessage(statusMsg).then(id => statusMsg.id = id)
       scrollToBottom()
+    } else {
+      console.warn('[onStatusMessage] Invalid data:', { taskId: data.taskId, activeTaskId: activeTaskId.value, hasData: !!data.data })
     }
   },
   (data: any) => {
@@ -697,7 +708,22 @@ const showConnectionGuide = ref(false)
 
 // --- Computed ---
 const filteredChatHistory = computed(() => {
-  return chatHistory.value.filter((msg: any) => {
+  console.log('[filteredChatHistory] All messages before filter:', chatHistory.value.map((msg: any) => ({
+    role: msg.role,
+    thought: msg.thought,
+    thoughtLength: msg.thought?.length,
+    isThinking: msg.isThinking,
+    content: msg.content,
+    contentLength: msg.content?.length,
+    action: msg.action,
+    type: msg.type,
+    isInfo: msg.isInfo,
+    isFailed: msg.isFailed,
+    isError: msg.isError,
+    hasScreenshot: !!msg.screenshot
+  })))
+  
+  const filtered = chatHistory.value.filter((msg: any) => {
     // User messages always have content, so keep them
     if (msg.role === 'user') {
       return true
@@ -727,9 +753,43 @@ const filteredChatHistory = computed(() => {
       false
     )
     
-    // Keep if has any content, or is thinking (will show placeholder), or has screenshot
-    return hasThought || hasContent || hasValidAction || hasType || hasSpecialFlags || hasScreenshot || isThinking
+    // For status messages, check if they have valid status data
+    // A status message is valid if it has statusType AND at least one of: status, message, or progress
+    const hasValidStatus = hasType === 'status' && (
+      (msg.statusType && (msg.statusType.trim ? msg.statusType.trim() : msg.statusType)) &&
+      ((msg.status && msg.status.trim()) || (msg.message && msg.message.trim()) || msg.progress !== undefined || msg.progress !== null)
+    )
+    
+    // Keep if has any content, or is thinking (will show placeholder), or has screenshot, or has valid status
+    // For status messages, only keep if they have valid data
+    const shouldKeep = hasThought || hasContent || hasValidAction || hasValidStatus || (hasType && hasType !== 'status') || hasSpecialFlags || hasScreenshot || isThinking
+    
+    if (!shouldKeep) {
+      console.log('[filteredChatHistory] Filtered out message:', {
+        role: msg.role,
+        thought: msg.thought,
+        isThinking: msg.isThinking,
+        content: msg.content,
+        action: msg.action,
+        type: msg.type
+      })
+    }
+    
+    return shouldKeep
   })
+  
+  console.log('[filteredChatHistory] Filtered messages:', filtered.map((msg: any) => ({
+    role: msg.role,
+    thought: msg.thought,
+    thoughtLength: msg.thought?.length,
+    isThinking: msg.isThinking,
+    content: msg.content,
+    contentLength: msg.content?.length,
+    action: msg.action,
+    type: msg.type
+  })))
+  
+  return filtered
 })
 
 // --- Methods ---

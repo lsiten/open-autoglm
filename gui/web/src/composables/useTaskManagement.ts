@@ -186,7 +186,16 @@ export function useTaskManagement(
         const hasScreenshot = msg.screenshot
         const isThinking = msg.isThinking === true
         
-        return hasThought || hasContent || hasAction || hasType || hasSpecialFlags || hasScreenshot || isThinking
+        // For status messages, check if they have valid status data
+        const hasValidStatus = hasType === 'status' && (
+          (msg.statusType && (msg.statusType.trim ? msg.statusType.trim() : msg.statusType)) &&
+          ((msg.status && msg.status.trim()) || (msg.message && msg.message.trim()) || msg.progress !== undefined || msg.progress !== null)
+        )
+        
+        // For other type messages (not status), keep them
+        const hasOtherType = hasType && hasType !== 'status'
+        
+        return hasThought || hasContent || hasAction || hasValidStatus || hasOtherType || hasSpecialFlags || hasScreenshot || isThinking
       })
       
       if (beforeId) {

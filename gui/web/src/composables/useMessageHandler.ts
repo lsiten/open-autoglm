@@ -128,6 +128,14 @@ export function useMessageHandler(
     return history
   }
   const handleLog = (data: any) => {
+    console.log('[handleLog] Received log:', {
+      level: data.level,
+      message: data.message,
+      messageLength: data.message?.length,
+      messageTrimmed: data.message?.trim(),
+      hasScreenshot: !!data.screenshot
+    })
+    
     const lastMsg = chatHistory.value[chatHistory.value.length - 1]
     const isBackground = isBackgroundTask.value
     
@@ -157,6 +165,12 @@ export function useMessageHandler(
           sessionId: activeTaskId.value,
           screenshot: screenshotData
         }
+        console.log('[handleLog] Created new thinking message:', {
+          thought: newMsg.thought,
+          thoughtLength: newMsg.thought?.length,
+          isThinking: newMsg.isThinking,
+          hasScreenshot: !!newMsg.screenshot
+        })
         chatHistory.value.push(newMsg)
         if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       }

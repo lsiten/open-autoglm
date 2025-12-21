@@ -55,13 +55,19 @@ const statusTitle = computed(() => {
 })
 
 const displayMessage = computed(() => {
-  if (props.message.message) {
+  if (props.message.message && props.message.message.trim()) {
     return props.message.message
   }
-  if (props.message.status) {
+  if (props.message.status && props.message.status.trim()) {
     return props.message.status
   }
   return ''
+})
+
+// Check if message has valid data to display
+const hasValidData = computed(() => {
+  return (statusType.value && statusType.value.trim()) && 
+         (displayMessage.value || props.message.progress !== undefined)
 })
 
 const progressStatus = computed(() => {

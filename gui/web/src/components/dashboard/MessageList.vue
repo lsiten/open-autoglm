@@ -83,7 +83,7 @@
 
           <!-- Status Message: Long-running task progress -->
           <StatusMessage
-            v-if="msg.type === 'status'"
+            v-if="msg.type === 'status' && ((msg.statusType && msg.statusType.trim()) && ((msg.status && msg.status.trim()) || (msg.message && msg.message.trim()) || msg.progress !== undefined))"
             :message="msg"
           />
         </template>
@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import InfoMessage from './messages/InfoMessage.vue'
 import ScreenshotMessage from './messages/ScreenshotMessage.vue'
@@ -105,12 +105,33 @@ import InputMessage from './messages/InputMessage.vue'
 import ClickAnnotationMessage from './messages/ClickAnnotationMessage.vue'
 import StatusMessage from './messages/StatusMessage.vue'
 
-defineProps<{
+const props = defineProps<{
   messages: any[]
   isLoadingMore?: boolean
   collapseState: Record<number, { thought?: boolean, screenshot?: boolean, info?: boolean }>
   latestScreenshot?: string
 }>()
+
+// Debug: Log all messages being rendered
+watch(() => props.messages, (newMessages) => {
+  console.log('[MessageList] All messages to render:', newMessages.map((msg: any, index: number) => ({
+    index,
+    role: msg.role,
+    thought: msg.thought,
+    thoughtLength: msg.thought?.length,
+    thoughtTrimmed: msg.thought?.trim(),
+    isThinking: msg.isThinking,
+    content: msg.content,
+    contentLength: msg.content?.length,
+    action: msg.action,
+    type: msg.type,
+    isInfo: msg.isInfo,
+    hasScreenshot: !!msg.screenshot,
+    willShowThinkMessage: (msg.thought || msg.isThinking) && !msg.action && !msg.isAnswer,
+    willShowAnswerMessage: msg.isAnswer || msg.action || (msg.content && !msg.isInfo && !msg.thought && !msg.isThinking),
+    willShowInfoMessage: msg.isInfo && msg.content
+  })))
+}, { immediate: true, deep: true })
 
 defineEmits<{
   'preview-image': [url: string]
