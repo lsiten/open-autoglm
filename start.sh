@@ -22,6 +22,7 @@ FRONTEND_PID_FILE="$PROJECT_ROOT/.frontend.pid"
 
 # 全局变量
 DEV_MODE="false"
+USE_HTTPS="true"  # 默认启用 HTTPS
 
 # 清理函数
 cleanup() {
@@ -94,8 +95,42 @@ check_dependencies() {
     
     # 检查 Python 依赖
     if ! python3 -c "import uvicorn" 2>/dev/null; then
-        echo -e "${YELLOW}警告: 未找到 uvicorn，正在安装依赖...${NC}"
-        pip install -r requirements.txt
+        echo -e "${YELLOW}警告: 未找到 uvicorn，正在安装 GUI 依赖...${NC}"
+        
+        # 尝试安装，如果遇到 PEP 668 错误，提供建议
+        if ! python3 -m pip install uvicorn fastapi websockets python-multipart 2>&1 | tee /tmp/pip_install.log | grep -v "already satisfied"; then
+            if grep -q "externally-managed-environment\|PEP 668" /tmp/pip_install.log 2>/dev/null; then
+                echo -e "${RED}错误: 系统 Python 环境受保护，无法直接安装依赖${NC}"
+                echo -e "${YELLOW}建议解决方案：${NC}"
+                echo "  1. 使用虚拟环境（推荐）："
+                echo "     python3 -m venv venv"
+                echo "     source venv/bin/activate"
+                echo "     pip install -r requirements.txt"
+                echo "     pip install uvicorn fastapi websockets python-multipart"
+                echo ""
+                echo "  2. 或使用 --break-system-packages（不推荐）："
+                echo "     python3 -m pip install --break-system-packages uvicorn fastapi websockets python-multipart"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # 检查其他必需的依赖
+    if ! python3 -c "import fastapi" 2>/dev/null; then
+        echo -e "${YELLOW}警告: 未找到 fastapi，正在安装...${NC}"
+        python3 -m pip install fastapi 2>&1 | grep -v "already satisfied" || true
+    fi
+    
+    # 安装 GUI 依赖（如果 requirements-gui.txt 存在）
+    if [ -f "requirements-gui.txt" ]; then
+        echo -e "${BLUE}安装 GUI 依赖...${NC}"
+        python3 -m pip install -r requirements-gui.txt 2>&1 | grep -v "already satisfied" || true
+    fi
+    
+    # 安装基础依赖（如果 requirements.txt 存在）
+    if [ -f "requirements.txt" ]; then
+        echo -e "${BLUE}安装基础依赖...${NC}"
+        python3 -m pip install -r requirements.txt 2>&1 | grep -v "already satisfied" || true
     fi
     
     # 检查前端依赖
@@ -104,6 +139,16 @@ check_dependencies() {
         cd gui/web
         npm install
         cd "$PROJECT_ROOT"
+    fi
+    
+    # 最终验证关键依赖
+    if ! python3 -c "import uvicorn" 2>/dev/null; then
+        echo -e "${RED}错误: uvicorn 安装失败或未正确安装${NC}"
+        echo "请检查 Python 环境，或使用虚拟环境："
+        echo "  python3 -m venv venv"
+        echo "  source venv/bin/activate"
+        echo "  pip install uvicorn fastapi websockets python-multipart"
+        exit 1
     fi
     
     echo -e "${GREEN}✓ 依赖检查完成${NC}"
@@ -143,6 +188,9 @@ start_backend() {
     if [ "$DEV_MODE" = "true" ]; then
         BACKEND_CMD="$BACKEND_CMD --dev"
     fi
+    if [ "$USE_HTTPS" = "true" ]; then
+        BACKEND_CMD="$BACKEND_CMD --https"
+    fi
     
     # 启动后端（后台运行）
     $BACKEND_CMD > .backend.log 2>&1 &
@@ -156,7 +204,11 @@ start_backend() {
     # 检查后端是否成功启动
     if ps -p "$BACKEND_PID" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ 后端服务已启动 (PID: $BACKEND_PID)${NC}"
-        echo -e "${GREEN}  后端地址: http://127.0.0.1:8000${NC}"
+        if [ "$USE_HTTPS" = "true" ]; then
+            echo -e "${GREEN}  后端地址: https://127.0.0.1:8000${NC}"
+        else
+            echo -e "${GREEN}  后端地址: http://127.0.0.1:8000${NC}"
+        fi
         if [ "$DEV_MODE" = "true" ]; then
             echo -e "${YELLOW}  开发模式: 代码修改后会自动重载${NC}"
         fi
@@ -171,12 +223,19 @@ start_backend() {
 start_frontend() {
     echo -e "\n${BLUE}启动前端服务...${NC}"
     
+    if [ "$USE_HTTPS" = "true" ]; then
+        echo -e "${YELLOW}HTTPS 模式: 启用安全连接${NC}"
+        export VITE_HTTPS="true"
+    else
+        export VITE_HTTPS="false"
+    fi
+    
     cd gui/web
     
     # 启动前端（后台运行）
     npm run dev -- --host > ../../.frontend.log 2>&1 &
     FRONTEND_PID=$!
-    echo "$FRONTEND_PID" > "$PROJECT_ROOT/$FRONTEND_PID_FILE"
+    echo "$FRONTEND_PID" > "$FRONTEND_PID_FILE"
     
     cd "$PROJECT_ROOT"
     
@@ -187,11 +246,75 @@ start_frontend() {
     # 检查前端是否成功启动
     if ps -p "$FRONTEND_PID" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ 前端服务已启动 (PID: $FRONTEND_PID)${NC}"
-        echo -e "${GREEN}  前端地址: http://localhost:5173${NC}"
+        if [ "$USE_HTTPS" = "true" ]; then
+            echo -e "${GREEN}  前端地址: https://localhost:5173${NC}"
+        else
+            echo -e "${GREEN}  前端地址: http://localhost:5173${NC}"
+        fi
     else
         echo -e "${RED}错误: 前端服务启动失败${NC}"
         echo "请查看 .frontend.log 文件获取详细信息"
         exit 1
+    fi
+}
+
+# 检查并生成证书
+check_certificates() {
+    CERT_DIR="$PROJECT_ROOT/certs"
+    KEY_FILE="$CERT_DIR/key.pem"
+    CERT_FILE="$CERT_DIR/cert.pem"
+    CONFIG_FILE="$CERT_DIR/openssl.cnf"
+    
+    if [ ! -f "$KEY_FILE" ] || [ ! -f "$CERT_FILE" ]; then
+        echo -e "${YELLOW}证书文件不存在，正在生成自签名证书...${NC}"
+        
+        # 确保 certs 目录存在
+        mkdir -p "$CERT_DIR"
+        
+        # 如果 openssl.cnf 不存在，创建一个默认的
+        if [ ! -f "$CONFIG_FILE" ]; then
+            cat > "$CONFIG_FILE" << 'EOF'
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+C = CN
+ST = State
+L = City
+O = Open-AutoGLM
+CN = localhost
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 = 127.0.0.1
+IP.2 = ::1
+DNS.1 = localhost
+DNS.2 = *.localhost
+EOF
+        fi
+        
+        # 生成私钥和证书
+        openssl req -x509 -newkey rsa:2048 -keyout "$KEY_FILE" -out "$CERT_FILE" \
+            -days 365 -nodes -config "$CONFIG_FILE" 2>/dev/null
+        
+        if [ $? -eq 0 ] && [ -f "$KEY_FILE" ] && [ -f "$CERT_FILE" ]; then
+            echo -e "${GREEN}✓ 证书生成成功${NC}"
+            chmod 600 "$KEY_FILE"
+            chmod 644 "$CERT_FILE"
+        else
+            echo -e "${RED}错误: 证书生成失败${NC}"
+            echo "请确保已安装 openssl，或手动生成证书："
+            echo "  openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}✓ 证书文件已存在${NC}"
     fi
 }
 
@@ -205,12 +328,22 @@ parse_args() {
                 DEV_MODE="true"
                 shift
                 ;;
+            --http)
+                USE_HTTPS="false"
+                shift
+                ;;
+            --https)
+                USE_HTTPS="true"
+                shift
+                ;;
             --help|-h)
                 echo "用法: $0 [选项]"
                 echo ""
                 echo "选项:"
-                echo "  --dev, -d    启动开发模式（启用自动重载）"
-                echo "  --help, -h    显示此帮助信息"
+                echo "  --dev, -d      启动开发模式（启用自动重载）"
+                echo "  --https        使用 HTTPS（默认）"
+                echo "  --http         使用 HTTP"
+                echo "  --help, -h      显示此帮助信息"
                 exit 0
                 ;;
             *)
@@ -232,6 +365,11 @@ main() {
     if [ "$DEV_MODE" = "true" ]; then
         echo -e "${YELLOW}  开发模式 (自动重载已启用)${NC}"
     fi
+    if [ "$USE_HTTPS" = "true" ]; then
+        echo -e "${YELLOW}  HTTPS 模式 (安全连接)${NC}"
+    else
+        echo -e "${BLUE}  HTTP 模式${NC}"
+    fi
     echo -e "${BLUE}========================================${NC}\n"
     
     # 检查环境
@@ -239,6 +377,12 @@ main() {
     check_node
     check_dependencies
     check_adb
+    
+    # 如果使用 HTTPS，检查证书
+    if [ "$USE_HTTPS" = "true" ]; then
+        echo ""
+        check_certificates
+    fi
     
     echo ""
     
@@ -250,8 +394,14 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  服务启动成功！${NC}"
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${BLUE}后端地址: ${GREEN}http://127.0.0.1:8000${NC}"
-    echo -e "${BLUE}前端地址: ${GREEN}http://localhost:5173${NC}"
+    if [ "$USE_HTTPS" = "true" ]; then
+        echo -e "${BLUE}后端地址: ${GREEN}https://127.0.0.1:8000${NC}"
+        echo -e "${BLUE}前端地址: ${GREEN}https://localhost:5173${NC}"
+        echo -e "${YELLOW}注意: 使用自签名证书，浏览器会显示安全警告，请点击"高级"->"继续访问"${NC}"
+    else
+        echo -e "${BLUE}后端地址: ${GREEN}http://127.0.0.1:8000${NC}"
+        echo -e "${BLUE}前端地址: ${GREEN}http://localhost:5173${NC}"
+    fi
     if [ "$DEV_MODE" = "true" ]; then
         echo -e "${YELLOW}开发模式: 代码修改后会自动重载${NC}"
     fi

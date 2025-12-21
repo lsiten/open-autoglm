@@ -21,21 +21,35 @@
 #### 启动服务
 
 ```bash
-# 普通模式
+# HTTPS 模式（默认，推荐）
 ./start.sh
+
+# HTTP 模式
+./start.sh --http
 
 # 开发模式（启用自动重载）
 ./start.sh --dev
 # 或
 ./start.sh -d
+
+# 组合使用
+./start.sh --dev --https  # 开发模式 + HTTPS
+./start.sh --dev --http    # 开发模式 + HTTP
 ```
 
 脚本会自动：
 1. 检查 Python 和 Node.js 环境
 2. 检查并安装依赖（如果需要）
 3. 检查 ADB 连接（可选）
-4. 启动后端服务（http://127.0.0.1:8000）
-5. 启动前端服务（http://localhost:5173）
+4. **HTTPS 模式**：自动生成自签名证书（如果不存在）
+5. 启动后端服务（https://127.0.0.1:8000 或 http://127.0.0.1:8000）
+6. 启动前端服务（https://localhost:5173 或 http://localhost:5173）
+
+**HTTPS 模式说明：**
+- 默认使用 HTTPS，提供安全连接
+- 首次运行会自动生成自签名证书（`certs/key.pem` 和 `certs/cert.pem`）
+- 浏览器会显示安全警告，点击"高级"->"继续访问"即可
+- 如需使用 HTTP，使用 `--http` 参数
 
 **开发模式说明：**
 - 使用 `--dev` 或 `-d` 参数启动开发模式
@@ -57,21 +71,36 @@
 双击 `start.bat` 或在命令行中运行：
 
 ```cmd
-REM 普通模式
+REM HTTPS 模式（默认，推荐）
 start.bat
+
+REM HTTP 模式
+start.bat --http
 
 REM 开发模式（启用自动重载）
 start.bat --dev
 REM 或
 start.bat -d
+
+REM 组合使用
+start.bat --dev --https  REM 开发模式 + HTTPS
+start.bat --dev --http   REM 开发模式 + HTTP
 ```
 
 脚本会自动：
 1. 检查 Python 和 Node.js 环境
 2. 检查并安装依赖（如果需要）
 3. 检查 ADB 连接（可选）
-4. 启动后端服务（http://127.0.0.1:8000）
-5. 启动前端服务（http://localhost:5173，在新窗口中运行）
+4. **HTTPS 模式**：检查证书文件（如果不存在，需要手动生成）
+5. 启动后端服务（https://127.0.0.1:8000 或 http://127.0.0.1:8000）
+6. 启动前端服务（https://localhost:5173 或 http://localhost:5173，在新窗口中运行）
+
+**HTTPS 模式说明：**
+- 默认使用 HTTPS，提供安全连接
+- Windows 下需要手动生成证书（使用 Git Bash 运行 `start.sh` 会自动生成）
+- 或手动运行：`openssl req -x509 -newkey rsa:2048 -keyout certs\key.pem -out certs\cert.pem -days 365 -nodes`
+- 浏览器会显示安全警告，点击"高级"->"继续访问"即可
+- 如需使用 HTTP，使用 `--http` 参数
 
 **开发模式说明：**
 - 使用 `--dev` 或 `-d` 参数启动开发模式
@@ -110,8 +139,15 @@ stop.bat
 
 启动成功后，可以通过以下地址访问：
 
+**HTTPS 模式（默认）：**
+- **后端 API**: https://127.0.0.1:8000
+- **前端界面**: https://localhost:5173
+
+**HTTP 模式：**
 - **后端 API**: http://127.0.0.1:8000
 - **前端界面**: http://localhost:5173
+
+**注意：** 使用 HTTPS 时，浏览器会显示安全警告（因为使用自签名证书），这是正常现象。点击"高级"->"继续访问"即可。
 
 ## 日志文件
 
@@ -133,12 +169,34 @@ stop.bat
 如果依赖安装失败，可以手动安装：
 
 ```bash
-# 安装 Python 依赖
+# 安装 GUI 依赖（必需）
+pip install -r requirements-gui.txt
+# 或
+pip install uvicorn fastapi websockets python-multipart
+
+# 安装基础依赖
 pip install -r requirements.txt
 
 # 安装前端依赖
 cd gui/web
 npm install
+```
+
+**注意：** 如果遇到 "externally-managed-environment" 或 "PEP 668" 错误，建议使用虚拟环境：
+
+```bash
+# 创建虚拟环境
+python3 -m venv venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source venv/bin/activate
+# Windows:
+venv\Scripts\activate
+
+# 安装依赖
+pip install -r requirements-gui.txt
+pip install -r requirements.txt
 ```
 
 ### 服务启动失败

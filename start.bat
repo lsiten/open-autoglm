@@ -10,6 +10,7 @@ cd /d "%PROJECT_ROOT%"
 
 REM 默认值
 set "DEV_MODE=0"
+set "USE_HTTPS=1"
 
 REM 解析命令行参数
 :parse_args
@@ -24,12 +25,24 @@ if /i "%~1"=="-d" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--https" (
+    set "USE_HTTPS=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--http" (
+    set "USE_HTTPS=0"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--help" (
     echo 用法: %~nx0 [选项]
     echo.
     echo 选项:
-    echo   --dev, -d    启动开发模式（启用自动重载）
-    echo   --help       显示此帮助信息
+    echo   --dev, -d      启动开发模式（启用自动重载）
+    echo   --https         使用 HTTPS（默认）
+    echo   --http          使用 HTTP
+    echo   --help          显示此帮助信息
     exit /b 0
 )
 if /i "%~1"=="-h" (
@@ -53,6 +66,11 @@ echo ========================================
 echo   Open-AutoGLM 一键启动脚本
 if "%DEV_MODE%"=="1" (
     echo   开发模式 (自动重载已启用)
+)
+if "%USE_HTTPS%"=="1" (
+    echo   HTTPS 模式 (安全连接)
+) else (
+    echo   HTTP 模式
 )
 echo ========================================
 echo.
@@ -104,8 +122,36 @@ echo 检查依赖...
 REM 检查 Python 依赖
 python -c "import uvicorn" >nul 2>&1
 if errorlevel 1 (
-    echo [警告] 未找到 uvicorn，正在安装依赖...
-    pip install -r requirements.txt
+    echo [警告] 未找到 uvicorn，正在安装 GUI 依赖...
+    python -m pip install uvicorn fastapi websockets python-multipart >nul 2>&1
+)
+
+REM 检查其他必需的依赖
+python -c "import fastapi" >nul 2>&1
+if errorlevel 1 (
+    echo [警告] 未找到 fastapi，正在安装...
+    python -m pip install fastapi >nul 2>&1
+)
+
+REM 安装 GUI 依赖（如果 requirements-gui.txt 存在）
+if exist "requirements-gui.txt" (
+    echo [信息] 安装 GUI 依赖...
+    python -m pip install -r requirements-gui.txt >nul 2>&1
+)
+
+REM 安装基础依赖（如果 requirements.txt 存在）
+if exist "requirements.txt" (
+    echo [信息] 安装基础依赖...
+    python -m pip install -r requirements.txt >nul 2>&1
+)
+
+REM 最终验证关键依赖
+python -c "import uvicorn" >nul 2>&1
+if errorlevel 1 (
+    echo [错误] uvicorn 安装失败
+    echo 请手动运行: python -m pip install uvicorn fastapi websockets python-multipart
+    pause
+    exit /b 1
 )
 
 REM 检查前端依赖
@@ -150,7 +196,10 @@ if not errorlevel 1 (
 REM 构建启动命令
 set "BACKEND_CMD=python run_gui.py --backend-only"
 if "%DEV_MODE%"=="1" (
-    set "BACKEND_CMD=python run_gui.py --backend-only --dev"
+    set "BACKEND_CMD=%BACKEND_CMD% --dev"
+)
+if "%USE_HTTPS%"=="1" (
+    set "BACKEND_CMD=%BACKEND_CMD% --https"
 )
 
 REM 启动后端（后台运行）
@@ -158,7 +207,11 @@ start /b %BACKEND_CMD% > .backend.log 2>&1
 timeout /t 3 /nobreak >nul
 
 echo [✓] 后端服务已启动
-echo    后端地址: http://127.0.0.1:8000
+if "%USE_HTTPS%"=="1" (
+    echo    后端地址: https://127.0.0.1:8000
+) else (
+    echo    后端地址: http://127.0.0.1:8000
+)
 if "%DEV_MODE%"=="1" (
     echo    开发模式: 代码修改后会自动重载
 )
@@ -168,22 +221,39 @@ echo 启动前端服务...
 
 cd gui\web
 
+REM 设置 HTTPS 环境变量
+if "%USE_HTTPS%"=="1" (
+    set "VITE_HTTPS=true"
+) else (
+    set "VITE_HTTPS=false"
+)
+
 REM 启动前端（新窗口运行，方便查看日志）
-start "Open-AutoGLM Frontend" cmd /k "npm run dev -- --host"
+start "Open-AutoGLM Frontend" cmd /k "set VITE_HTTPS=%VITE_HTTPS% && npm run dev -- --host"
 
 cd ..\..
 
 timeout /t 5 /nobreak >nul
 
 echo [✓] 前端服务已启动
-echo    前端地址: http://localhost:5173
+if "%USE_HTTPS%"=="1" (
+    echo    前端地址: https://localhost:5173
+) else (
+    echo    前端地址: http://localhost:5173
+)
 
 echo.
 echo ========================================
 echo   服务启动成功！
 echo ========================================
-echo 后端地址: http://127.0.0.1:8000
-echo 前端地址: http://localhost:5173
+if "%USE_HTTPS%"=="1" (
+    echo 后端地址: https://127.0.0.1:8000
+    echo 前端地址: https://localhost:5173
+    echo 注意: 使用自签名证书，浏览器会显示安全警告，请点击"高级"-^>"继续访问"
+) else (
+    echo 后端地址: http://127.0.0.1:8000
+    echo 前端地址: http://localhost:5173
+)
 if "%DEV_MODE%"=="1" (
     echo 开发模式: 代码修改后会自动重载
 )
