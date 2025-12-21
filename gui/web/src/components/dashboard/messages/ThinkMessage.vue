@@ -16,7 +16,12 @@
           <ArrowDown />
         </el-icon>
       </div>
-      <div v-show="!collapsed" class="p-4 text-sm text-amber-100 leading-relaxed max-h-64 overflow-y-auto custom-scrollbar" v-html="formatThink(message.thought)"></div>
+      <div v-show="!collapsed" class="p-4 text-sm text-amber-100 leading-relaxed max-h-64 overflow-y-auto custom-scrollbar">
+        <div v-if="message.thought" v-html="formatThink(message.thought)"></div>
+        <div v-else-if="message.isThinking" class="text-amber-300/60 italic">
+          {{ t('chat.thinking') || '思考中...' }}
+        </div>
+      </div>
       <div v-if="message.screenshot && !collapsed" class="px-4 pb-3">
         <img 
           :src="message.screenshot" 

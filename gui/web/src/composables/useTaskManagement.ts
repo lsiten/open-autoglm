@@ -165,10 +165,34 @@ export function useTaskManagement(
       if (msgs.length < MESSAGES_PER_PAGE) {
         hasMoreMessages.value = false
       }
+      
+      // Filter out empty messages
+      const filteredMsgs = msgs.filter((msg: any) => {
+        // User messages always have content, so keep them
+        if (msg.role === 'user') {
+          return true
+        }
+        
+        // Agent messages: filter out completely empty ones
+        const hasThought = msg.thought && msg.thought.trim()
+        const hasContent = msg.content && msg.content.trim()
+        const hasAction = msg.action && (
+          typeof msg.action === 'string' ? msg.action.trim() : 
+          typeof msg.action === 'object' ? Object.keys(msg.action).length > 0 : 
+          false
+        )
+        const hasType = msg.type // interaction messages
+        const hasSpecialFlags = msg.isInfo || msg.isFailed || msg.isError
+        const hasScreenshot = msg.screenshot
+        const isThinking = msg.isThinking === true
+        
+        return hasThought || hasContent || hasAction || hasType || hasSpecialFlags || hasScreenshot || isThinking
+      })
+      
       if (beforeId) {
-        chatHistory.value = [...msgs, ...chatHistory.value]
+        chatHistory.value = [...filteredMsgs, ...chatHistory.value]
       } else {
-        chatHistory.value = msgs
+        chatHistory.value = filteredMsgs
       }
     } catch (e) {
       console.error('Failed to load messages', e)
@@ -281,14 +305,8 @@ export function useTaskManagement(
     const id1 = await db.addMessage(userMsg)
     chatHistory.value.push({ ...userMsg, id: id1 })
     
-    const agentMsg = { 
-      role: 'agent', 
-      thought: '', 
-      isThinking: true,
-      sessionId: activeTaskId.value 
-    }
-    const id2 = await db.addMessage(agentMsg)
-    chatHistory.value.push({ ...agentMsg, id: id2 })
+    // Don't create empty thinking message - wait for backend to send first thought token
+    // The first thought token will create the thinking message automatically
     
     scrollToBottom()
 

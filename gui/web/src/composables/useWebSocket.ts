@@ -11,6 +11,7 @@ export function useWebSocket(
   isBackgroundTask: Ref<boolean>,
   onScreenshot?: (data: string) => void,
   onStatusUpdate?: (taskId: string, status: string) => void,
+  onStatusMessage?: (data: any) => void,
   onInteraction?: (data: any) => void,
   onLog?: (data: any) => void,
   onOpen?: () => void
@@ -65,9 +66,16 @@ export function useWebSocket(
       }
     } else if (data.type === 'status') {
       if (data.taskId) {
-        taskStatuses.value[data.taskId] = data.data.state
-        if (onStatusUpdate) {
-          onStatusUpdate(data.taskId, data.data.state)
+        // Update task status
+        if (data.data.state) {
+          taskStatuses.value[data.taskId] = data.data.state
+          if (onStatusUpdate) {
+            onStatusUpdate(data.taskId, data.data.state)
+          }
+        }
+        // Handle status message for chat history (installation progress, etc.)
+        if (onStatusMessage) {
+          onStatusMessage(data)
         }
       }
     } else if (data.type === 'interaction') {

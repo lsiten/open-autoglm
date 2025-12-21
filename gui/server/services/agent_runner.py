@@ -596,7 +596,16 @@ class AgentRunner:
             set_device_type(DeviceType.ADB)
         
         try:
-            display_name = prompt[:50] + "..." if len(prompt) > 50 else prompt
+            # Ensure prompt is not empty
+            if not prompt or not prompt.strip():
+                prompt = task.details or task.name or "未命名任务"
+            
+            # Ensure we have a valid display name
+            if not prompt or not prompt.strip():
+                display_name = "未命名任务"
+            else:
+                display_name = prompt[:50] + "..." if len(prompt) > 50 else prompt
+            
             # Get screenshot for starting task log
             start_screenshot = self._get_screenshot_for_task(task.id)
             self._emit_log(task.id, "info", f"Starting task: {display_name}", start_screenshot)
@@ -628,24 +637,14 @@ class AgentRunner:
             all_apps_for_llm = self._get_all_installed_apps(device_id, installed_apps)
             
             # Status callback for long-running tasks (e.g., app installation)
+            # NOTE: Currently only used for app installation progress monitoring.
+            # Other actions do not send progress messages.
             def status_callback(status_type: str, status_data: dict):
-                """Callback for reporting long-running task status updates."""
-                if self.main_loop and self.main_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        stream_manager.broadcast({
-                            "type": "status",
-                            "taskId": task.id,
-                            "data": {
-                                "status_type": status_type,
-                                **status_data
-                            }
-                        }),
-                        self.main_loop
-                    )
-            
-            # Status callback for long-running tasks (e.g., app installation)
-            def status_callback(status_type: str, status_data: dict):
-                """Callback for reporting long-running task status updates."""
+                """Callback for reporting long-running task status updates.
+                
+                Currently only used for app installation progress.
+                Other actions (Tap, Type, Swipe, etc.) do NOT send progress messages.
+                """
                 if self.main_loop and self.main_loop.is_running():
                     asyncio.run_coroutine_threadsafe(
                         stream_manager.broadcast({
@@ -686,7 +685,9 @@ class AgentRunner:
             self._emit_log(task.id, "info", "Analyzing screen...", analyze_screenshot)
             
             def on_token(token):
-                self._emit_log(task.id, "thought", token)
+                # Only emit non-empty tokens
+                if token and token.strip():
+                    self._emit_log(task.id, "thought", token)
                 
             result = agent.step(final_prompt, on_token=on_token)
             self._handle_step_result(task.id, result)
@@ -780,7 +781,11 @@ class AgentRunner:
                      self._emit_status(task.id, "error")
                  else:
                      # Task completed successfully
-                     self._emit_log(task.id, "success", f"Task completed: {finish_message}")
+                     # Only log if finish_message is not empty
+                     if finish_message and finish_message.strip():
+                         self._emit_log(task.id, "success", f"Task completed: {finish_message}")
+                     else:
+                         self._emit_log(task.id, "success", "Task completed")
                      task_manager.update_status(task.id, "completed")
                      self._emit_status(task.id, "completed")
             elif task.type != 'background':
@@ -855,18 +860,23 @@ class AgentRunner:
         # Use annotated screenshot if available (for Tap actions), otherwise use regular screenshot
         screenshot_base64 = result.annotated_screenshot if result.annotated_screenshot else self._get_screenshot_for_task(task_id)
         
-        if result.thinking:
+        # Only emit thinking if it's not empty or whitespace
+        if result.thinking and result.thinking.strip():
             self._emit_log(task_id, "thought", result.thinking, screenshot_base64)
         
-        if result.action:
+        # Only emit action if it's not None and not empty
+        if result.action and result.action != {}:
             if result.finished:
                 # If finished, check if it's a failure based on message content
                 finish_message = result.message or ""
                 is_failure = self._is_failure_message(finish_message, result.success)
                 
                 if is_failure:
-                    # Log as error for failed finish
-                    self._emit_log(task_id, "error", f"无法完成任务：{finish_message}", screenshot_base64)
+                    # Log as error for failed finish (only if finish_message is not empty)
+                    if finish_message and finish_message.strip():
+                        self._emit_log(task_id, "error", f"无法完成任务：{finish_message}", screenshot_base64)
+                    else:
+                        self._emit_log(task_id, "error", "无法完成任务", screenshot_base64)
                 else:
                     # Log as action for successful finish (will be handled by completion logic)
                     action_str = json.dumps(result.action, ensure_ascii=False)
@@ -877,6 +887,10 @@ class AgentRunner:
                 self._emit_log(task_id, "action", action_str, screenshot_base64)
 
     def _emit_log(self, task_id: str, level: str, message: str, screenshot: str = None):
+        # Skip empty messages (None, empty string, or only whitespace)
+        if not message or not message.strip():
+            return
+        
         # Store in DB
         task_manager.add_log(task_id, level, message, screenshot)
         

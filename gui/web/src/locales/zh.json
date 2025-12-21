@@ -47,6 +47,7 @@
     "input_placeholder": "输入指令...",
     "select_device_placeholder": "← 请先选择设备",
     "reasoning_chain": "推理链",
+    "thinking": "思考中...",
     "action_executed": "执行动作",
     "screenshot": "AI看到的画面",
     "expand": "展开",
@@ -63,7 +64,16 @@
     "annotated_position": "标注位置",
     "operation_description": "操作说明",
     "enter_operation_description": "请输入操作说明（可选）",
-    "click_annotation_hint": "在截图上点击以标注要点击的位置，可以输入操作说明以便后续学习"
+    "click_annotation_hint": "在截图上点击以标注要点击的位置，可以输入操作说明以便后续学习",
+    "progress": "进度"
+  },
+  "status": {
+    "task_status": "任务状态",
+    "installation_detected": "检测到安装任务",
+    "installation_progress": "安装进度",
+    "installation_completed": "安装完成",
+    "installation_failed": "安装失败",
+    "installation_timeout": "安装超时"
   },
   "mirror": {
     "title": "设备镜像",

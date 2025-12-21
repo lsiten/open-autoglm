@@ -19,6 +19,11 @@ export function useMessageHandler(
       const screenshotData = log.screenshot ? `data:image/jpeg;base64,${log.screenshot}` : null
       
       if (log.level === 'thought') {
+        // Skip empty messages
+        if (!log.message || !log.message.trim()) {
+          continue
+        }
+        
         if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
           lastMsg.thought += log.message
           // Update screenshot if provided
@@ -35,6 +40,11 @@ export function useMessageHandler(
           history.push(lastMsg)
         }
       } else if (log.level === 'success') {
+        // Skip empty messages
+        if (!log.message || !log.message.trim()) {
+          continue
+        }
+        
         if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
           lastMsg.isThinking = false
           lastMsg.content = log.message
@@ -51,14 +61,26 @@ export function useMessageHandler(
         }
         lastMsg = null
       } else if (log.level === 'info') {
-        if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
+        // Skip empty messages
+        if (!log.message || !log.message.trim()) {
+          continue
+        }
+        
+        // For "Starting task" messages, always create a separate info message
+        // instead of appending to thinking message, so it's visible
+        const isStartingTask = log.message && (
+          log.message.toLowerCase().includes('starting task') || 
+          log.message.includes('开始任务')
+        )
+        
+        if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking && !isStartingTask) {
           lastMsg.thought += '\n[INFO] ' + log.message
           // Update screenshot if provided
           if (screenshotData && !lastMsg.screenshot) {
             lastMsg.screenshot = screenshotData
           }
         } else {
-          // Create a new info message if no thinking message exists
+          // Create a new info message if no thinking message exists or it's a starting task message
           history.push({ 
             role: 'agent', 
             content: log.message,
@@ -68,6 +90,11 @@ export function useMessageHandler(
           lastMsg = null
         }
       } else if (log.level === 'action') {
+        // Skip empty messages
+        if (!log.message || !log.message.trim()) {
+          continue
+        }
+        
         // Action/Answer should always be a separate message, not merged with think
         // Close any thinking message first
         if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
@@ -82,6 +109,11 @@ export function useMessageHandler(
         })
         lastMsg = null
       } else if (log.level === 'error') {
+        // Skip empty messages
+        if (!log.message || !log.message.trim()) {
+          continue
+        }
+        
         history.push({ 
           role: 'agent', 
           content: log.message,
@@ -102,6 +134,11 @@ export function useMessageHandler(
     const screenshotData = data.screenshot ? `data:image/jpeg;base64,${data.screenshot}` : null
     
     if (data.level === 'thought') {
+      // Skip empty messages
+      if (!data.message || !data.message.trim()) {
+        return
+      }
+      
       if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
         lastMsg.thought += data.message
         if (screenshotData && !lastMsg.screenshot) {
@@ -124,6 +161,11 @@ export function useMessageHandler(
         if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       }
     } else if (data.level === 'success') {
+      // Skip empty messages
+      if (!data.message || !data.message.trim()) {
+        return
+      }
+      
       if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
         lastMsg.isThinking = false
         lastMsg.content = data.message
@@ -146,7 +188,19 @@ export function useMessageHandler(
         if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       }
     } else if (data.level === 'info') {
-      if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
+      // Skip empty messages
+      if (!data.message || !data.message.trim()) {
+        return
+      }
+      
+      // For "Starting task" messages, always create a separate info message
+      // instead of appending to thinking message, so it's visible
+      const isStartingTask = data.message && (
+        data.message.toLowerCase().includes('starting task') || 
+        data.message.includes('开始任务')
+      )
+      
+      if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking && !isStartingTask) {
         lastMsg.thought += (lastMsg.thought ? '\n' : '') + '[INFO] ' + data.message
         if (screenshotData && !lastMsg.screenshot) {
           lastMsg.screenshot = screenshotData
@@ -168,6 +222,11 @@ export function useMessageHandler(
         if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
       }
     } else if (data.level === 'action') {
+      // Skip empty messages
+      if (!data.message || !data.message.trim()) {
+        return
+      }
+      
       if (lastMsg && lastMsg.role === 'agent' && lastMsg.isThinking) {
         lastMsg.isThinking = false
         if (!isBackground && lastMsg.id) {
@@ -184,6 +243,11 @@ export function useMessageHandler(
       chatHistory.value.push(newMsg)
       if (!isBackground) db.addMessage(newMsg).then(id => newMsg.id = id)
     } else if (data.level === 'error') {
+      // Skip empty messages
+      if (!data.message || !data.message.trim()) {
+        return
+      }
+      
       const errorMsg: any = { 
         role: 'agent', 
         content: data.message, 

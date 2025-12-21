@@ -434,6 +434,25 @@ const {
     }
   },
   (data: any) => {
+    // onStatusMessage - Long-running task progress (e.g., installation)
+    if (data.taskId === activeTaskId.value && data.data) {
+      const statusMsg: any = {
+        role: 'agent',
+        type: 'status',
+        statusType: data.data.status_type,
+        status: data.data.status || '',
+        message: data.data.message || '',
+        app: data.data.app || '',
+        progress: data.data.progress || null,
+        sessionId: activeTaskId.value,
+        timestamp: Date.now()
+      }
+      chatHistory.value.push(statusMsg)
+      db.addMessage(statusMsg).then(id => statusMsg.id = id)
+      scrollToBottom()
+    }
+  },
+  (data: any) => {
     // onInteraction
     const interactionMsg: any = {
       role: 'agent',
@@ -677,7 +696,41 @@ const {
 const showConnectionGuide = ref(false)
 
 // --- Computed ---
-const filteredChatHistory = computed(() => chatHistory.value)
+const filteredChatHistory = computed(() => {
+  return chatHistory.value.filter((msg: any) => {
+    // User messages always have content, so keep them
+    if (msg.role === 'user') {
+      return true
+    }
+    
+    // Agent messages: filter out completely empty ones
+    // A message is considered empty if it has:
+    // - No thought (or empty/whitespace thought) AND
+    // - No content (or empty/whitespace content) AND
+    // - No action AND
+    // - No type (interaction messages) AND
+    // - No special flags (isInfo, isFailed, isError) AND
+    // - No screenshot (screenshot-only messages should be shown)
+    // BUT: Keep messages with isThinking=true even if thought is empty (will show "思考中...")
+    const hasThought = msg.thought && msg.thought.trim()
+    const hasContent = msg.content && msg.content.trim()
+    const hasAction = msg.action
+    const hasType = msg.type // interaction messages (confirm, input, click_annotation, status)
+    const hasSpecialFlags = msg.isInfo || msg.isFailed || msg.isError
+    const hasScreenshot = msg.screenshot
+    const isThinking = msg.isThinking === true
+    
+    // Check if action is non-empty (could be string or object)
+    const hasValidAction = hasAction && (
+      typeof hasAction === 'string' ? hasAction.trim() : 
+      typeof hasAction === 'object' ? Object.keys(hasAction).length > 0 : 
+      false
+    )
+    
+    // Keep if has any content, or is thinking (will show placeholder), or has screenshot
+    return hasThought || hasContent || hasValidAction || hasType || hasSpecialFlags || hasScreenshot || isThinking
+  })
+})
 
 // --- Methods ---
 const handleTaskSave = async (data: any) => {

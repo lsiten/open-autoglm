@@ -37,7 +37,7 @@
 
           <!-- Think/Reasoning -->
           <ThinkMessage
-            v-if="msg.thought && !msg.action && !msg.isAnswer"
+            v-if="(msg.thought || msg.isThinking) && !msg.action && !msg.isAnswer"
             :message="msg"
             :index="index"
             :collapse-state="collapseState[index]?.thought ?? true"
@@ -80,6 +80,12 @@
             :latest-screenshot="latestScreenshot"
             @annotation="$emit('card-annotation', $event)"
           />
+
+          <!-- Status Message: Long-running task progress -->
+          <StatusMessage
+            v-if="msg.type === 'status'"
+            :message="msg"
+          />
         </template>
       </div>
     </div>
@@ -97,6 +103,7 @@ import ErrorMessage from './messages/ErrorMessage.vue'
 import ConfirmMessage from './messages/ConfirmMessage.vue'
 import InputMessage from './messages/InputMessage.vue'
 import ClickAnnotationMessage from './messages/ClickAnnotationMessage.vue'
+import StatusMessage from './messages/StatusMessage.vue'
 
 defineProps<{
   messages: any[]

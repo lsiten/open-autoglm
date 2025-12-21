@@ -75,7 +75,7 @@ class PhoneAgent:
         takeover_callback: Callable[[str], None] | None = None,
         input_callback: Callable[[str], str] | None = None,
         click_annotation_callback: Callable[[str], dict] | None = None,
-        status_callback: Callable[[str, dict], None] | None = None,
+        status_callback: Callable[[str, dict], None] | None = None,  # Only used for long-running tasks like app installation
     ):
         self.model_config = model_config or ModelConfig()
         self.agent_config = agent_config or AgentConfig()
@@ -103,6 +103,8 @@ class PhoneAgent:
         self.click_annotation_callback = click_annotation_callback
         
         # Store status_callback for long-running task status updates
+        # NOTE: Currently only used for app installation progress monitoring.
+        # Other actions do not send progress messages.
         self.status_callback = status_callback
 
     def run(self, task: str) -> str:
@@ -165,6 +167,9 @@ class PhoneAgent:
         This is called before each step to ensure installations complete before proceeding.
         
         First confirms installation has started by analyzing screenshot, then waits for completion.
+        
+        NOTE: This is the ONLY place where status_callback is used to send progress messages.
+        Other actions (Tap, Type, Swipe, etc.) do NOT send progress messages.
         """
         # Check current app - if we're in an app store or installer, we might be installing
         current_app = device_factory.get_current_app(

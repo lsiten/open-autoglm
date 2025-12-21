@@ -47,6 +47,7 @@
     "input_placeholder": "Type instructions...",
     "select_device_placeholder": "← Select a device to start",
     "reasoning_chain": "Reasoning Chain",
+    "thinking": "Thinking...",
     "action_executed": "Action Executed",
     "screenshot": "Screenshot Seen by AI",
     "expand": "Expand",
@@ -69,7 +70,16 @@
     "operation_description": "Operation Description",
     "enter_operation_description": "Enter operation description (optional)",
     "click_annotation_hint": "Click on the screenshot to annotate the position to tap, you can enter an operation description for future learning",
-    "enter_value": "Enter value..."
+    "enter_value": "Enter value...",
+    "progress": "Progress"
+  },
+  "status": {
+    "task_status": "Task Status",
+    "installation_detected": "Installation Detected",
+    "installation_progress": "Installation Progress",
+    "installation_completed": "Installation Completed",
+    "installation_failed": "Installation Failed",
+    "installation_timeout": "Installation Timeout"
   },
   "mirror": {
     "title": "Device Mirror",
