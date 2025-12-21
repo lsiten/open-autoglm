@@ -154,8 +154,23 @@ const loadConfig = async () => {
   try {
     const res = await api.get('/agent/app-matching-config')
     const data = res.data
+    const mappings = data.system_app_mappings || {}
+    
+    // Convert old format (string[]) to new format (Array<{package, platform}>)
+    const convertedMappings: Record<string, Array<{package: string, platform?: string}>> = {}
+    for (const [keyword, packages] of Object.entries(mappings)) {
+      if (Array.isArray(packages)) {
+        convertedMappings[keyword] = packages.map((pkg: any) => {
+          if (typeof pkg === 'string') {
+            return { package: pkg, platform: detectPlatform(pkg) }
+          }
+          return { package: pkg.package || '', platform: pkg.platform || detectPlatform(pkg.package || '') }
+        })
+      }
+    }
+    
     config.value = {
-      system_app_mappings: data.system_app_mappings || {},
+      system_app_mappings: convertedMappings,
       llm_prompt_template: data.llm_prompt_template || ''
     }
     // Initialize localKeyword
