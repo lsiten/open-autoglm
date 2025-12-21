@@ -21,6 +21,7 @@
     "add_device": "新しいデバイスを追加",
     "configuration": "設定",
     "model_settings": "モデル設定",
+    "app_matching_settings": "アプリマッチング設定",
     "connected": "サーバー接続済み",
     "disconnected": "切断されました",
     "offline": "オフライン",
@@ -85,7 +86,12 @@
     "provider_bailian": "通義千問 (アリババ)",
     "provider_gemini": "Google Gemini",
     "provider_claude": "Anthropic Claude",
-    "provider_custom": "カスタム"
+    "provider_custom": "カスタム",
+    "system_prompt_title": "システムプロンプト設定",
+    "system_prompt_desc": "AIエージェントのシステムプロンプトを設定し、AIの動作と意思決定をガイドします。{date}プレースホルダーを使用して現在の日付を自動挿入できます。",
+    "system_prompt_placeholder": "システムプロンプトを入力...",
+    "system_prompt_variables": "利用可能な変数",
+    "system_prompt_variables_desc": "現在の日付に自動置換されます"
   },
   "guide": {
     "title": "デバイスを接続",

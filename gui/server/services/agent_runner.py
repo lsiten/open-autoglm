@@ -12,6 +12,7 @@ from .device_manager import device_manager
 from .task_manager import task_manager, AgentTask
 from .stream_manager import stream_manager
 from .screen_streamer import screen_streamer
+from .config_manager import config_manager
 
 class AgentRunner:
     _instance = None
@@ -121,31 +122,100 @@ class AgentRunner:
             
         return approved
 
+    def _is_confirmation_question(self, message: str) -> bool:
+        """
+        Determine if a message is a confirmation question (Yes/No) 
+        or requires actual input (password, account, code, etc.).
+        """
+        message_lower = message.lower()
+        
+        # Keywords that indicate input is needed (password, account, code, etc.)
+        input_keywords = [
+            "密码", "password", "pwd",
+            "账号", "账户", "account", "username", "user name",
+            "验证码", "verification code", "verification", "code",
+            "输入", "enter", "请输入", "please enter",
+            "提供", "provide", "填写", "fill in"
+        ]
+        
+        # Keywords that indicate confirmation question (Yes/No)
+        confirmation_keywords = [
+            "是否需要", "是否", "需要我", "是否允许", "是否同意",
+            "do you need", "do you want", "would you like", 
+            "should i", "may i", "can i", "是否要", "要不要",
+            "是否安装", "是否下载", "是否继续", "是否执行",
+            "install", "download", "continue", "proceed"
+        ]
+        
+        # Check for input keywords first (higher priority)
+        for keyword in input_keywords:
+            if keyword in message_lower:
+                return False
+        
+        # Check for confirmation keywords
+        for keyword in confirmation_keywords:
+            if keyword in message_lower:
+                return True
+        
+        # Default: if message is short and ends with question mark, likely confirmation
+        # Otherwise, assume it needs input
+        if len(message.strip()) < 50 and message.strip().endswith(("?", "？")):
+            return True
+        
+        return False
+
     def _input_callback(self, task_id: str, message: str) -> str:
         """
         Callback for requesting user input.
+        Intelligently determines if this is a confirmation question (Yes/No)
+        or requires actual input (password, account, code, etc.).
         Blocks until user responds via API.
         """
-        self._emit_log(task_id, "warn", f"Waiting for input: {message}")
+        is_confirmation = self._is_confirmation_question(message)
+        
+        if is_confirmation:
+            self._emit_log(task_id, "warn", f"Waiting for confirmation: {message}")
+        else:
+            self._emit_log(task_id, "warn", f"Waiting for input: {message}")
         
         event = threading.Event()
         self.pending_interactions[task_id] = {"event": event, "response": None}
         
-        # Send UI Card
+        # Send UI Card - determine type based on message content
         if self.main_loop and self.main_loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                stream_manager.broadcast({
-                    "type": "interaction",
-                    "taskId": task_id,
-                    "data": {
-                        "type": "input",
-                        "title": "Input Required",
-                        "content": message,
-                        "placeholder": "Enter value..."
-                    }
-                }),
-                self.main_loop
-            )
+            if is_confirmation:
+                # Send confirmation UI with Yes/No buttons
+                # Don't set title, let frontend use i18n default
+                asyncio.run_coroutine_threadsafe(
+                    stream_manager.broadcast({
+                        "type": "interaction",
+                        "taskId": task_id,
+                        "data": {
+                            "type": "confirm",
+                            "content": message,
+                            "options": [
+                                {"label": "No", "value": "No", "type": "danger"},
+                                {"label": "Yes", "value": "Yes", "type": "success"}
+                            ]
+                        }
+                    }),
+                    self.main_loop
+                )
+            else:
+                # Send input UI with text field
+                # Don't set title, let frontend use i18n default
+                asyncio.run_coroutine_threadsafe(
+                    stream_manager.broadcast({
+                        "type": "interaction",
+                        "taskId": task_id,
+                        "data": {
+                            "type": "input",
+                            "content": message,
+                            "placeholder": "Enter value..."
+                        }
+                    }),
+                    self.main_loop
+                )
             
         task_data = self.active_tasks.get(task_id)
         while not event.is_set():
@@ -157,7 +227,10 @@ class AgentRunner:
         response = self.pending_interactions[task_id]["response"]
         del self.pending_interactions[task_id]
         
-        self._emit_log(task_id, "info", f"User provided input: {response}")
+        if is_confirmation:
+            self._emit_log(task_id, "info", f"User confirmed: {response}")
+        else:
+            self._emit_log(task_id, "info", f"User provided input: {response}")
         return str(response)
 
     def _takeover_callback(self, task_id: str, message: str) -> None:
@@ -342,12 +415,20 @@ class AgentRunner:
             if task.role:
                 final_prompt = f"Role: {task.role}\nTask: {prompt}"
 
+            # Get app matching config from config_manager
+            system_app_mappings = config_manager.get_system_app_mappings()
+            llm_prompt_template = config_manager.get_llm_prompt_template()
+            system_prompt = config_manager.get_system_prompt(lang="cn")
+            
             agent = PhoneAgent(
                 model_config=model_config,
                 agent_config=AgentConfig(
                     device_id=device_id,
                     verbose=True,
-                    installed_apps=installed_apps
+                    installed_apps=installed_apps,
+                    system_app_mappings=system_app_mappings,
+                    llm_prompt_template=llm_prompt_template,
+                    system_prompt=system_prompt
                 ),
                 confirmation_callback=lambda msg: self._confirmation_callback(task.id, msg),
                 input_callback=lambda msg: self._input_callback(task.id, msg),
@@ -446,17 +527,21 @@ class AgentRunner:
                  self._emit_status(task.id, "stopped")
             elif task.type != 'background' and result.finished:
                  # Check if task completed successfully or failed
-                 if result.success:
-                     # Task completed successfully
-                     self._emit_log(task.id, "success", f"Task completed: {result.message}")
-                     task_manager.update_status(task.id, "completed")
-                     self._emit_status(task.id, "completed")
-                 else:
+                 # Check both result.success and message content for failure indicators
+                 finish_message = result.message or ""
+                 is_failure = self._is_failure_message(finish_message, result.success)
+                 
+                 if is_failure:
                      # Task finished but failed
-                     failure_reason = result.message or "任务执行失败，原因未知"
-                     self._emit_log(task.id, "error", f"无法完成任务：{failure_reason}")
+                     # Error message already logged in _handle_step_result, just update status
+                     failure_reason = finish_message or "任务执行失败，原因未知"
                      task_manager.update_status(task.id, "error")
                      self._emit_status(task.id, "error")
+                 else:
+                     # Task completed successfully
+                     self._emit_log(task.id, "success", f"Task completed: {finish_message}")
+                     task_manager.update_status(task.id, "completed")
+                     self._emit_status(task.id, "completed")
             elif task.type != 'background':
                  # Task cannot be completed - reached max steps
                  self._emit_log(task.id, "error", "无法完成任务：已达到最大执行步数，任务可能过于复杂或无法在当前条件下完成。")
@@ -501,6 +586,29 @@ class AgentRunner:
             pass
         return None
 
+    def _is_failure_message(self, message: str, result_success: bool) -> bool:
+        """Check if a finish message indicates task failure."""
+        if not result_success:
+            return True
+        
+        if not message:
+            return False
+        
+        failure_keywords = [
+            "无法完成", "不能完成", "无法实现", "不能实现",
+            "失败", "错误", "异常",
+            "cannot", "unable", "failed", "error", "exception",
+            "未找到", "找不到", "not found", "missing",
+            "无法安装", "不能安装", "cannot install",
+            "无法打开", "不能打开", "cannot open",
+        ]
+        
+        message_lower = message.lower()
+        for keyword in failure_keywords:
+            if keyword.lower() in message_lower:
+                return True
+        return False
+
     def _handle_step_result(self, task_id: str, result: StepResult):
         # Get screenshot for this step
         screenshot_base64 = self._get_screenshot_for_task(task_id)
@@ -508,10 +616,23 @@ class AgentRunner:
         if result.thinking:
             self._emit_log(task_id, "thought", result.thinking, screenshot_base64)
         
-        if result.action and not result.finished:
-            # Format action for display
-            action_str = json.dumps(result.action, ensure_ascii=False)
-            self._emit_log(task_id, "action", action_str, screenshot_base64)
+        if result.action:
+            if result.finished:
+                # If finished, check if it's a failure based on message content
+                finish_message = result.message or ""
+                is_failure = self._is_failure_message(finish_message, result.success)
+                
+                if is_failure:
+                    # Log as error for failed finish
+                    self._emit_log(task_id, "error", f"无法完成任务：{finish_message}", screenshot_base64)
+                else:
+                    # Log as action for successful finish (will be handled by completion logic)
+                    action_str = json.dumps(result.action, ensure_ascii=False)
+                    self._emit_log(task_id, "action", action_str, screenshot_base64)
+            else:
+                # Format action for display
+                action_str = json.dumps(result.action, ensure_ascii=False)
+                self._emit_log(task_id, "action", action_str, screenshot_base64)
 
     def _emit_log(self, task_id: str, level: str, message: str, screenshot: str = None):
         # Store in DB

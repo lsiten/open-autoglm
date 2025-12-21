@@ -32,12 +32,29 @@ def get_current_app(device_id: str | None = None) -> str:
     if not output:
         raise ValueError("No output from hidumper")
 
+    # Common HarmonyOS launcher package names (system desktop/home screen)
+    LAUNCHER_PACKAGES = [
+        "com.ohos.launcher",
+        "com.huawei.android.launcher",
+        "com.huawei.hwlauncher",
+    ]
+
     # Parse window focus info
     for line in output.split("\n"):
         if "focused" in line.lower() or "current" in line.lower():
+            # First check if it's a known app
             for app_name, package in APP_PACKAGES.items():
                 if package in line:
                     return app_name
+            
+            # Then check if it's a launcher (system desktop)
+            for launcher_pkg in LAUNCHER_PACKAGES:
+                if launcher_pkg in line:
+                    return "System Home"
+            
+            # Also check for common launcher indicators
+            if "launcher" in line.lower() and ("ability" in line.lower() or "/" in line):
+                return "System Home"
 
     return "System Home"
 

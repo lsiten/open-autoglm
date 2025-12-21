@@ -23,6 +23,8 @@ class AgentConfig:
     system_prompt: str | None = None
     verbose: bool = True
     installed_apps: list[dict[str, Any]] | None = None
+    system_app_mappings: dict[str, list] | None = None
+    llm_prompt_template: str | None = None
 
     def __post_init__(self):
         if self.system_prompt is None:
@@ -74,11 +76,16 @@ class PhoneAgent:
         self.agent_config = agent_config or AgentConfig()
 
         self.model_client = ModelClient(self.model_config)
+        
         self.action_handler = ActionHandler(
             device_id=self.agent_config.device_id,
             confirmation_callback=confirmation_callback,
             takeover_callback=takeover_callback,
             input_callback=input_callback,
+            model_client=self.model_client,
+            installed_apps=self.agent_config.installed_apps,
+            system_app_mappings=self.agent_config.system_app_mappings,
+            llm_prompt_template=self.agent_config.llm_prompt_template,
         )
 
         self._context: list[dict[str, Any]] = []

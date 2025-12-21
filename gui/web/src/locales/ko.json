@@ -21,6 +21,7 @@
     "add_device": "새 장치 추가",
     "configuration": "설정",
     "model_settings": "모델 설정",
+    "app_matching_settings": "앱 매칭 설정",
     "connected": "서버에 연결됨",
     "disconnected": "연결 끊김",
     "offline": "오프라인",
@@ -85,7 +86,12 @@
     "provider_bailian": "通義千問 (알리바바)",
     "provider_gemini": "Google Gemini",
     "provider_claude": "Anthropic Claude",
-    "provider_custom": "사용자 정의"
+    "provider_custom": "사용자 정의",
+    "system_prompt_title": "시스템 프롬프트 설정",
+    "system_prompt_desc": "AI 에이전트의 시스템 프롬프트를 구성하여 AI의 동작과 의사 결정을 안내합니다. {date} 플레이스홀더를 사용하여 현재 날짜를 자동으로 삽입할 수 있습니다.",
+    "system_prompt_placeholder": "시스템 프롬프트를 입력하세요...",
+    "system_prompt_variables": "사용 가능한 변수",
+    "system_prompt_variables_desc": "현재 날짜로 자동 대체됩니다"
   },
   "guide": {
     "title": "장치 연결",

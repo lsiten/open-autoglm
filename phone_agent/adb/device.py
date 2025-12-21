@@ -83,12 +83,56 @@ def get_current_app(device_id: str | None = None) -> str:
     if not output:
         raise ValueError("No output from dumpsys window")
 
+    # Common launcher package names (system desktop/home screen)
+    LAUNCHER_PACKAGES = [
+        "com.android.launcher",
+        "com.android.launcher2",
+        "com.android.launcher3",
+        "com.huawei.android.launcher",  # Huawei
+        "com.miui.home",  # Xiaomi
+        "com.oppo.launcher",  # OPPO
+        "com.vivo.launcher",  # vivo
+        "com.samsung.android.app.launcher",  # Samsung
+        "com.oneplus.launcher",  # OnePlus
+        "com.meizu.flyme.launcher",  # Meizu
+        "com.coloros.launcher",  # ColorOS (OPPO)
+        "com.funtouch.launcher",  # Funtouch OS (vivo)
+        "com.bbk.launcher2",  # vivo (older)
+        "com.sec.android.app.launcher",  # Samsung (older)
+        "com.sonyericsson.home",  # Sony
+        "com.lge.launcher2",  # LG
+        "com.htc.launcher",  # HTC
+    ]
+
     # Parse window focus info
     for line in output.split("\n"):
-        if "mCurrentFocus" in line or "mFocusedApp" in line:
+        if "mCurrentFocus" in line or "mFocusedApp" in line or "mTopApp" in line:
+            # First check if it's a known app
             for app_name, package in APP_PACKAGES.items():
                 if package in line:
                     return app_name
+            
+            # Then check if it's a launcher (system desktop)
+            for launcher_pkg in LAUNCHER_PACKAGES:
+                if launcher_pkg in line:
+                    return "System Home"
+            
+            # Also check for common launcher indicators in the line
+            if "launcher" in line.lower() and ("activity" in line.lower() or "/" in line):
+                # Extract package name from line (format: package/activity)
+                parts = line.split()
+                for part in parts:
+                    if "/" in part and ("launcher" in part.lower() or "home" in part.lower()):
+                        return "System Home"
+
+    # Additional check: look for launcher in mTopApp or mResumedActivity
+    for line in output.split("\n"):
+        if "mTopApp" in line or "mResumedActivity" in line:
+            for launcher_pkg in LAUNCHER_PACKAGES:
+                if launcher_pkg in line:
+                    return "System Home"
+            if "launcher" in line.lower() and ("activity" in line.lower() or "/" in line):
+                return "System Home"
 
     return "System Home"
 

@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from phone_agent.config.timing import TIMING_CONFIG
 from phone_agent.device_factory import get_device_factory
+from phone_agent.utils.app_matcher import match_app_with_llm
 
 
 @dataclass
@@ -38,11 +39,19 @@ class ActionHandler:
         confirmation_callback: Callable[[str], bool] | None = None,
         takeover_callback: Callable[[str], None] | None = None,
         input_callback: Callable[[str], str] | None = None,
+        model_client: Any = None,
+        installed_apps: list[dict[str, Any]] | None = None,
+        system_app_mappings: dict[str, list] | None = None,
+        llm_prompt_template: str | None = None,
     ):
         self.device_id = device_id
         self.confirmation_callback = confirmation_callback or self._default_confirmation
         self.takeover_callback = takeover_callback or self._default_takeover
         self.input_callback = input_callback or self._default_input
+        self.model_client = model_client
+        self.installed_apps = installed_apps
+        self.system_app_mappings = system_app_mappings
+        self.llm_prompt_template = llm_prompt_template
 
     def execute(
         self, action: dict[str, Any], screen_width: int, screen_height: int, current_app: str = None
@@ -133,10 +142,73 @@ class ActionHandler:
         
         app_name = app_name.strip()
         
+        # Extract action context from the action message if available
+        action_context = action.get("message", "")
+        # Also check if app_name contains action keywords
+        action_keywords = ["发短信", "发信息", "打电话", "拨号", "联系人", "send", "sms", "call", "dial", "message"]
+        if any(kw in app_name for kw in action_keywords):
+            action_context = app_name
+        
+        # First, try to match app using LLM if model_client and installed_apps are available
+        matched_package = None
+        matched_app_name = None
+        
+        if self.model_client and self.installed_apps:
+            try:
+                match_result = match_app_with_llm(
+                    app_name,
+                    self.installed_apps,
+                    self.model_client,
+                    system_app_mappings=self.system_app_mappings,
+                    llm_prompt_template=self.llm_prompt_template,
+                    action_context=action_context if action_context else None
+                )
+                
+                if match_result.get("installed", False):
+                    matched_package = match_result.get("package_id")
+                    matched_app_name = match_result.get("app_name")
+                    print(f"[ActionHandler] LLM matched '{app_name}' to package '{matched_package}' (name: {matched_app_name})")
+            except Exception as e:
+                print(f"[ActionHandler] Error matching app with LLM: {e}")
+        
         device_factory = get_device_factory()
-        success = device_factory.launch_app(app_name, self.device_id)
+        
+        # If no match found and this is a system action, provide better error message
+        if not matched_package:
+            action_keywords = ["发短信", "发信息", "打电话", "拨号", "联系人", "send", "sms", "call", "dial", "message"]
+            is_system_action = any(kw in app_name for kw in action_keywords)
+            if is_system_action:
+                # Check if we have installed_apps to provide more context
+                if self.installed_apps:
+                    # Try to find any SMS/MMS related apps in installed list
+                    sms_keywords = ["短信", "信息", "消息", "mms", "messaging"]
+                    found_apps = []
+                    for app in self.installed_apps:
+                        app_name_lower = (app.get("name", "") + " " + app.get("package", "")).lower()
+                        if any(kw in app_name_lower for kw in sms_keywords):
+                            found_apps.append(f"{app.get('name', '')} ({app.get('package', '')})")
+                    
+                    if found_apps:
+                        return ActionResult(
+                            False, 
+                            True, 
+                            f"设备上未找到短信应用,无法发送短信。但发现以下相关应用: {', '.join(found_apps[:3])}"
+                        )
+                
+                return ActionResult(
+                    False, 
+                    True, 
+                    f"设备上未找到短信应用,无法发送短信。请检查设备是否已安装短信应用，或尝试在应用市场中安装。"
+                )
+        
+        # Try to launch with matched package if available, otherwise use original app_name
+        launch_name = matched_package if matched_package else app_name
+        success = device_factory.launch_app(launch_name, self.device_id)
+        
         if success:
             time.sleep(TIMING_CONFIG.device.default_launch_delay)
+            if matched_app_name and matched_app_name != app_name:
+                return ActionResult(True, False, f"Launched '{matched_app_name}' (matched from '{app_name}')")
             return ActionResult(True, False)
             
         # App not found -> Potential Install

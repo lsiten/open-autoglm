@@ -57,6 +57,16 @@ def get_current_app(
             bundle_id = value.get("bundleId", "")
 
             if bundle_id:
+                # Common iOS launcher/SpringBoard bundle IDs (system desktop/home screen)
+                LAUNCHER_BUNDLES = [
+                    "com.apple.springboard",  # iOS SpringBoard (home screen)
+                    "com.apple.Preferences",  # Settings (sometimes shown as home)
+                ]
+                
+                # Check if it's a launcher first
+                if bundle_id in LAUNCHER_BUNDLES:
+                    return "System Home"
+                
                 # Try to find app name from bundle ID
                 for app_name, package in APP_PACKAGES.items():
                     if package == bundle_id:

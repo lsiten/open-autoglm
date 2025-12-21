@@ -1,0 +1,114 @@
+{
+  "system_app_mappings": {
+    "应用市场": [
+      "com.huawei.appmarket",
+      "com.xiaomi.market",
+      "com.oppo.market",
+      "com.vivo.appstore",
+      "com.samsung.android.apps.samsungapps",
+      "com.tencent.android.qqdownloader",
+      "com.qihoo.appstore",
+      "com.baidu.appsearch",
+      "com.wandoujia.phoenix2",
+      "com.yingyonghui.market"
+    ],
+    "应用商店": [
+      "com.huawei.appmarket",
+      "com.xiaomi.market",
+      "com.oppo.market",
+      "com.vivo.appstore",
+      "com.samsung.android.apps.samsungapps"
+    ],
+    "app store": [
+      "com.huawei.appmarket",
+      "com.xiaomi.market",
+      "com.oppo.market",
+      "com.vivo.appstore",
+      "com.samsung.android.apps.samsungapps"
+    ],
+    "market": [
+      "com.huawei.appmarket",
+      "com.xiaomi.market",
+      "com.oppo.market",
+      "com.vivo.appstore"
+    ],
+    "短信": [
+      "com.android.mms",
+      "com.android.messaging",
+      "com.huawei.mms",
+      "com.miui.mms",
+      "com.coloros.mms",
+      "com.funtouch.mms",
+      "com.samsung.android.messaging"
+    ],
+    "信息": [
+      "com.android.mms",
+      "com.android.messaging",
+      "com.huawei.mms",
+      "com.miui.mms"
+    ],
+    "消息": [
+      "com.android.mms",
+      "com.android.messaging",
+      "com.huawei.mms",
+      "com.miui.mms"
+    ],
+    "sms": [
+      "com.android.mms",
+      "com.android.messaging",
+      "com.huawei.mms",
+      "com.miui.mms"
+    ],
+    "电话": [
+      "com.android.dialer",
+      "com.android.contacts",
+      "com.huawei.contacts",
+      "com.miui.dialer",
+      "com.coloros.dialer",
+      "com.funtouch.dialer",
+      "com.samsung.android.dialer"
+    ],
+    "拨号": [
+      "com.android.dialer",
+      "com.huawei.contacts",
+      "com.miui.dialer",
+      "com.coloros.dialer"
+    ],
+    "拨号器": [
+      "com.android.dialer",
+      "com.huawei.contacts",
+      "com.miui.dialer"
+    ],
+    "phone": [
+      "com.android.dialer",
+      "com.android.contacts",
+      "com.huawei.contacts",
+      "com.miui.dialer"
+    ],
+    "dialer": [
+      "com.android.dialer",
+      "com.huawei.contacts",
+      "com.miui.dialer"
+    ],
+    "联系人": [
+      "com.android.contacts",
+      "com.huawei.contacts",
+      "com.miui.contacts",
+      "com.coloros.contacts",
+      "com.funtouch.contacts",
+      "com.samsung.android.contacts"
+    ],
+    "通讯录": [
+      "com.android.contacts",
+      "com.huawei.contacts",
+      "com.miui.contacts",
+      "com.coloros.contacts"
+    ],
+    "contacts": [
+      "com.android.contacts",
+      "com.huawei.contacts",
+      "com.miui.contacts"
+    ]
+  },
+  "llm_prompt_template": "请根据用户输入的应用名称或描述，在已安装应用列表中查找匹配的应用。\n\n用户输入：{user_input}\n\n已安装应用列表：\n{apps_text}\n\n系统应用提示（如果用户输入匹配以下关键词，优先查找这些包名）：\n{system_hints_text}\n\n请分析用户输入是否匹配已安装应用列表中的某个应用。匹配规则：\n1. 如果用户输入是应用名称（如\"微信\"、\"抖音\"），查找列表中名称相同或相似的应用\n2. 如果用户输入是包名（如\"com.tencent.mm\"），查找列表中包名相同的应用\n3. 如果用户输入是应用描述（如\"聊天软件\"、\"视频应用\"），根据应用名称推断匹配\n4. 对于系统应用（如\"应用市场\"、\"短信\"、\"电话\"、\"联系人\"），优先匹配系统应用提示中的包名\n5. 注意：不同品牌手机的系统应用包名可能不同（如华为、小米、OPPO、vivo等），需要根据实际已安装列表匹配\n\n如果匹配成功，请返回：\n- installed: true\n- package_id: 匹配的应用包名\n- app_name: 匹配的应用名称\n- reason: 匹配原因说明\n\n如果未匹配到任何应用，请返回：\n- installed: false\n- package_id: null\n- app_name: null\n- reason: 未找到匹配的应用\n\n请严格按照以下JSON格式返回，不要添加任何其他内容：\n{{\n    \"installed\": true,\n    \"package_id\": \"com.example.app\",\n    \"app_name\": \"应用名称\",\n    \"reason\": \"匹配原因说明\"\n}}"
+}

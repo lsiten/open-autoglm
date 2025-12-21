@@ -1,6 +1,7 @@
 import time
 import uuid
 import socket
+import subprocess
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 import shutil
@@ -12,6 +13,7 @@ class DeviceInfo(BaseModel):
     type: str  # 'adb' or 'hdc'
     status: str
     connection_type: str # 'usb' or 'wifi'
+    brand: Optional[str] = None  # Device brand (e.g., 'Huawei', 'Xiaomi')
 
 class DeviceManager:
     _instance = None
@@ -46,6 +48,148 @@ class DeviceManager:
             cls._instance = cls()
         return cls._instance
 
+    def _get_device_brand(self, device_id: str, device_type: str) -> Optional[str]:
+        """Get device brand using ADB/HDC commands."""
+        try:
+            if device_type == "adb" and self.adb_path:
+                # Try ro.product.brand first, then ro.product.manufacturer
+                for prop in ["ro.product.brand", "ro.product.manufacturer"]:
+                    result = subprocess.run(
+                        [self.adb_path, "-s", device_id, "shell", "getprop", prop],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        brand = result.stdout.strip()
+                        # Normalize brand names
+                        return self._normalize_brand(brand)
+            elif device_type == "hdc" and self.hdc_path:
+                # Try to get brand for HarmonyOS devices
+                for prop in ["hw_sc.build.platform.name", "ro.product.brand"]:
+                    result = subprocess.run(
+                        [self.hdc_path, "-t", device_id, "shell", "param get", prop],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        brand = result.stdout.strip()
+                        return self._normalize_brand(brand)
+        except Exception as e:
+            print(f"Error getting device brand for {device_id}: {e}")
+        return None
+    
+    def _normalize_brand(self, brand: str) -> str:
+        """Normalize brand names to common formats."""
+        brand_lower = brand.lower().strip()
+        # Map common variations to standard names
+        brand_map = {
+            "huawei": "华为",
+            "honor": "荣耀",
+            "xiaomi": "小米",
+            "redmi": "红米",
+            "oppo": "OPPO",
+            "oneplus": "一加",
+            "vivo": "vivo",
+            "iqoo": "iQOO",
+            "samsung": "三星",
+            "meizu": "魅族",
+            "realme": "realme",
+            "motorola": "摩托罗拉",
+            "lenovo": "联想",
+            "zte": "中兴",
+            "coolpad": "酷派",
+            "gionee": "金立",
+            "nubia": "努比亚",
+            "smartisan": "锤子",
+            "360": "360",
+            "leeco": "乐视",
+        }
+        
+        # Check exact match first
+        if brand_lower in brand_map:
+            return brand_map[brand_lower]
+        
+        # Check partial match
+        for key, value in brand_map.items():
+            if key in brand_lower or brand_lower in key:
+                return value
+        
+        # Return capitalized original if no match
+        return brand.strip().title()
+
+    def _get_device_brand(self, device_id: str, device_type: str) -> Optional[str]:
+        """Get device brand using ADB/HDC commands."""
+        try:
+            if device_type == "adb" and self.adb_path:
+                # Try ro.product.brand first, then ro.product.manufacturer
+                for prop in ["ro.product.brand", "ro.product.manufacturer"]:
+                    result = subprocess.run(
+                        [self.adb_path, "-s", device_id, "shell", "getprop", prop],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        brand = result.stdout.strip()
+                        # Normalize brand names
+                        return self._normalize_brand(brand)
+            elif device_type == "hdc" and self.hdc_path:
+                # Try to get brand for HarmonyOS devices
+                for prop in ["hw_sc.build.platform.name", "ro.product.brand"]:
+                    result = subprocess.run(
+                        [self.hdc_path, "-t", device_id, "shell", "param get", prop],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        brand = result.stdout.strip()
+                        return self._normalize_brand(brand)
+        except Exception as e:
+            print(f"Error getting device brand for {device_id}: {e}")
+        return None
+    
+    def _normalize_brand(self, brand: str) -> str:
+        """Normalize brand names to common formats."""
+        brand_lower = brand.lower().strip()
+        # Map common variations to standard names
+        brand_map = {
+            "huawei": "华为",
+            "honor": "荣耀",
+            "xiaomi": "小米",
+            "redmi": "红米",
+            "oppo": "OPPO",
+            "oneplus": "一加",
+            "vivo": "vivo",
+            "iqoo": "iQOO",
+            "samsung": "三星",
+            "meizu": "魅族",
+            "realme": "realme",
+            "motorola": "摩托罗拉",
+            "lenovo": "联想",
+            "zte": "中兴",
+            "coolpad": "酷派",
+            "gionee": "金立",
+            "nubia": "努比亚",
+            "smartisan": "锤子",
+            "360": "360",
+            "leeco": "乐视",
+        }
+        
+        # Check exact match first
+        if brand_lower in brand_map:
+            return brand_map[brand_lower]
+        
+        # Check partial match
+        for key, value in brand_map.items():
+            if key in brand_lower or brand_lower in key:
+                return value
+        
+        # Return capitalized original if no match
+        return brand.strip().title()
+
     def list_all_devices(self) -> List[DeviceInfo]:
         devices = []
         
@@ -64,11 +208,14 @@ class DeviceManager:
             try:
                 adb_devices = adb_list_devices()
                 for d in adb_devices:
+                    brand = self._get_device_brand(d.device_id, "adb")
+                    print(f"Device {d.device_id} brand: {brand}")  # Debug log
                     devices.append(DeviceInfo(
                         id=d.device_id,
                         type="adb",
                         status="device", # Simplified for now
-                        connection_type=d.connection_type.value
+                        connection_type=d.connection_type.value,
+                        brand=brand
                     ))
             except Exception as e:
                 print(f"Error listing ADB devices: {e}")
@@ -78,11 +225,13 @@ class DeviceManager:
             try:
                 hdc_devices = hdc_list_devices()
                 for d in hdc_devices:
+                    brand = self._get_device_brand(d.device_id, "hdc")
                     devices.append(DeviceInfo(
                         id=d.device_id,
                         type="hdc",
                         status="device",
-                        connection_type=d.connection_type.value
+                        connection_type=d.connection_type.value,
+                        brand=brand or "华为"  # HarmonyOS devices are typically Huawei
                     ))
             except Exception as e:
                 print(f"Error listing HDC devices: {e}")
@@ -93,7 +242,8 @@ class DeviceManager:
                 id=wd['id'],
                 type="webrtc",
                 status=wd.get('status', 'connected'),
-                connection_type="remote"
+                connection_type="remote",
+                brand=wd.get('brand')  # WebRTC devices might have brand info
             ))
             
         return devices
