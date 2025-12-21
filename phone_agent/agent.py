@@ -238,10 +238,11 @@ class PhoneAgent:
                             print(f"[Agent] Installation failed")
                             if self.status_callback:
                                 try:
+                                    app_name = current_app if current_app and current_app.strip() else "应用市场"
                                     self.status_callback("installation_failed", {
-                                        "app": current_app,
+                                        "app": app_name,
                                         "status": "安装失败",
-                                        "message": installation_status.get("message", "安装失败")
+                                        "message": installation_status.get("message", "安装失败") or "安装失败"
                                     })
                                 except Exception as e:
                                     print(f"[Agent] Error in status callback: {e}")
@@ -272,10 +273,12 @@ class PhoneAgent:
         # Report status: installation detected and confirmed
         if self.status_callback:
             try:
+                # Ensure current_app is not empty
+                app_name = current_app if current_app and current_app.strip() else "应用市场"
                 self.status_callback("installation_detected", {
-                    "app": current_app,
+                    "app": app_name,
                     "status": "检测到安装任务",
-                    "message": f"已确认正在 {current_app} 中安装应用，等待安装完成..."
+                    "message": f"已确认正在 {app_name} 中安装应用，等待安装完成..."
                 })
             except Exception as e:
                 print(f"[Agent] Error in status callback: {e}")
@@ -345,10 +348,11 @@ class PhoneAgent:
                         print(f"[Agent] Installation completed (detected by AI)")
                         if self.status_callback:
                             try:
+                                app_name = current_app if current_app and current_app.strip() else "应用市场"
                                 self.status_callback("installation_completed", {
-                                    "app": current_app,
+                                    "app": app_name,
                                     "status": "安装完成",
-                                    "message": installation_status.get("message", "安装已完成")
+                                    "message": installation_status.get("message", "安装已完成") or "安装已完成"
                                 })
                             except Exception as e:
                                 print(f"[Agent] Error in status callback: {e}")
@@ -360,10 +364,11 @@ class PhoneAgent:
                         print(f"[Agent] Installation failed (detected by AI)")
                         if self.status_callback:
                             try:
+                                app_name = current_app if current_app and current_app.strip() else "应用市场"
                                 self.status_callback("installation_failed", {
-                                    "app": current_app,
+                                    "app": app_name,
                                     "status": "安装失败",
-                                    "message": installation_status.get("message", "安装失败")
+                                    "message": installation_status.get("message", "安装失败") or "安装失败"
                                 })
                             except Exception as e:
                                 print(f"[Agent] Error in status callback: {e}")
@@ -377,10 +382,11 @@ class PhoneAgent:
                             print(f"[Agent] {status_message}")
                             if self.status_callback:
                                 try:
+                                    app_name = current_app if current_app and current_app.strip() else "应用市场"
                                     self.status_callback("installation_progress", {
-                                        "app": current_app,
+                                        "app": app_name,
                                         "status": "安装中",
-                                        "message": status_message,
+                                        "message": status_message or "安装中...",
                                         "progress": progress / 100.0
                                     })
                                 except Exception as e:
@@ -406,8 +412,9 @@ class PhoneAgent:
                 print(f"[Agent] Left installer app, assuming installation completed or cancelled")
                 if self.status_callback:
                     try:
+                        app_name = current_app_after if current_app_after and current_app_after.strip() else "应用市场"
                         self.status_callback("installation_completed", {
-                            "app": current_app_after,
+                            "app": app_name,
                             "status": "安装完成",
                             "message": "已离开安装器，安装可能已完成"
                         })
@@ -427,10 +434,11 @@ class PhoneAgent:
                     print(f"[Agent] {status_message}")
                     if self.status_callback:
                         try:
+                            app_name = current_app if current_app and current_app.strip() else "应用市场"
                             self.status_callback("installation_progress", {
-                                "app": current_app,
+                                "app": app_name,
                                 "status": "安装中",
-                                "message": status_message,
+                                "message": status_message or "等待安装完成...",
                                 "progress": min(waited / max_wait_time, 0.95)  # Max 95% until complete
                             })
                         except Exception as e:
@@ -441,8 +449,9 @@ class PhoneAgent:
             print(f"[Agent] Timeout waiting for installation to complete")
             if self.status_callback:
                 try:
+                    app_name = current_app if current_app and current_app.strip() else "应用市场"
                     self.status_callback("installation_timeout", {
-                        "app": current_app,
+                        "app": app_name,
                         "status": "安装超时",
                         "message": f"等待安装超时 ({max_wait_time}s)"
                     })

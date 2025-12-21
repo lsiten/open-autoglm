@@ -645,6 +645,33 @@ class AgentRunner:
                 Currently only used for app installation progress.
                 Other actions (Tap, Type, Swipe, etc.) do NOT send progress messages.
                 """
+                # Validate status data before sending
+                if not status_type or not status_type.strip():
+                    print(f"[AgentRunner] Warning: Empty status_type, skipping status callback")
+                    return
+                
+                if not status_data:
+                    print(f"[AgentRunner] Warning: Empty status_data, skipping status callback")
+                    return
+                
+                # Check if status_data has at least one valid field
+                # Handle both string and non-string values
+                status_value = status_data.get("status")
+                message_value = status_data.get("message")
+                progress_value = status_data.get("progress")
+                
+                has_valid_data = (
+                    (status_value and isinstance(status_value, str) and status_value.strip()) or
+                    (message_value and isinstance(message_value, str) and message_value.strip()) or
+                    (progress_value is not None and progress_value != "")
+                )
+                
+                if not has_valid_data:
+                    print(f"[AgentRunner] Warning: status_data has no valid content (status_type={status_type}, status_data={status_data}), skipping status callback")
+                    return
+                
+                print(f"[AgentRunner] Sending status: status_type={status_type}, status_data={status_data}")
+                
                 if self.main_loop and self.main_loop.is_running():
                     asyncio.run_coroutine_threadsafe(
                         stream_manager.broadcast({
@@ -657,6 +684,8 @@ class AgentRunner:
                         }),
                         self.main_loop
                     )
+                else:
+                    print(f"[AgentRunner] Warning: main_loop not running, cannot send status")
             
             agent = PhoneAgent(
                 model_config=model_config,
