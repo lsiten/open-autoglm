@@ -149,32 +149,20 @@ async def update_device_permissions(device_id: str, permissions: DevicePermissio
 async def get_device_apps(device_id: str):
     try:
         # Get User Installed (3rd party) - These are definitely "operable"
+        # Note: This endpoint only returns user-installed apps, not system apps
+        # System apps are fetched separately by the backend when needed for LLM
         user_packages = get_installed_packages(device_id, include_system=False)
-        user_pkg_set = set(user_packages)
-
-        # Get ALL packages to check for supported system apps
-        all_packages = get_installed_packages(device_id, include_system=True)
-        all_pkg_set = set(all_packages)
         
         # Invert APP_PACKAGES for lookup: package -> name
         pkg_to_name = {v: k for k, v in APP_PACKAGES.items()}
         
         apps = []
-        added_pkgs = set()
         
-        # 1. Add ALL user packages
+        # Add ALL user packages only
         for pkg in user_packages:
             name = pkg_to_name.get(pkg, pkg)
             is_supported = pkg in pkg_to_name
             apps.append({"name": name, "package": pkg, "type": "supported" if is_supported else "other"})
-            added_pkgs.add(pkg)
-
-        # 2. Add Supported System Apps (e.g. Settings, Camera) that were missed
-        for pkg, name in pkg_to_name.items():
-            if pkg in all_pkg_set and pkg not in added_pkgs:
-                # It is installed (system) and supported
-                apps.append({"name": name, "package": pkg, "type": "supported"})
-                added_pkgs.add(pkg)
 
         # Sort: Supported first, then alphabetical
         apps.sort(key=lambda x: (0 if x["type"] == "supported" else 1, x["name"]))

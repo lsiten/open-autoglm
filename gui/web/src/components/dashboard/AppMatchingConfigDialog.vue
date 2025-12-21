@@ -8,57 +8,59 @@
   >
     <el-tabs v-model="activeTab">
       <el-tab-pane :label="t('settings.system_app_mappings')" name="mappings">
-        <div class="mt-4 space-y-4">
+        <div class="mt-4">
           <div class="text-sm text-gray-400 mb-4">{{ t('settings.system_app_mappings_desc') }}</div>
-          <div v-for="(packages, keyword) in config.system_app_mappings" :key="keyword" class="border border-gray-700 rounded-lg p-4 bg-[#0d1117]">
-            <div class="flex items-center justify-between mb-3">
-              <el-input 
-                v-model="localKeyword[keyword]" 
-                :placeholder="t('settings.keyword_placeholder')"
-                size="small"
-                class="flex-1 mr-2"
-              />
-              <el-button type="danger" size="small" circle @click="removeMapping(keyword)">
-                <el-icon><Close /></el-icon>
-              </el-button>
-            </div>
-            <div class="space-y-2">
-              <div v-for="(pkgItem, pkgIndex) in packages" :key="pkgIndex" class="flex items-start gap-2">
-                <div class="flex-1">
-                  <div class="text-xs text-gray-500 mb-1">{{ t('settings.package_name') }}</div>
-                  <el-input 
-                    v-model="pkgItem.package" 
-                    :placeholder="t('settings.package_name_placeholder')"
-                    size="small"
-                    @input="updatePackagePlatform(keyword, pkgIndex)"
-                  />
-                </div>
-                <div class="w-32">
-                  <div class="text-xs text-gray-500 mb-1">{{ t('settings.platform') }}</div>
-                  <el-select 
-                    v-model="pkgItem.platform" 
-                    :placeholder="t('settings.platform_placeholder')"
-                    size="small"
-                    filterable
-                    allow-create
-                    default-first-option
-                  >
-                    <el-option 
-                      v-for="platform in availablePlatforms" 
-                      :key="platform" 
-                      :label="platform" 
-                      :value="platform"
-                    />
-                  </el-select>
-                </div>
-                <el-button type="danger" size="small" circle @click="removePackage(keyword, pkgIndex)" class="mt-6">
+          <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-4 custom-scrollbar">
+            <div v-for="(packages, keyword) in config.system_app_mappings" :key="keyword" class="border border-gray-700 rounded-lg p-4 bg-[#0d1117]">
+              <div class="flex items-center justify-between mb-3">
+                <el-input 
+                  v-model="localKeyword[keyword]" 
+                  :placeholder="t('settings.keyword_placeholder')"
+                  size="small"
+                  class="flex-1 mr-2"
+                />
+                <el-button type="danger" size="small" circle @click="removeMapping(keyword)">
                   <el-icon><Close /></el-icon>
                 </el-button>
               </div>
-              <el-button size="small" @click="addPackage(keyword)">{{ t('settings.add_package') }}</el-button>
+              <div class="space-y-2">
+                <div v-for="(pkgItem, pkgIndex) in packages" :key="pkgIndex" class="flex items-start gap-2">
+                  <div class="flex-1">
+                    <div class="text-xs text-gray-500 mb-1">{{ t('settings.package_name') }}</div>
+                    <el-input 
+                      v-model="pkgItem.package" 
+                      :placeholder="t('settings.package_name_placeholder')"
+                      size="small"
+                      @input="updatePackagePlatform(keyword, pkgIndex)"
+                    />
+                  </div>
+                  <div class="w-32">
+                    <div class="text-xs text-gray-500 mb-1">{{ t('settings.platform') }}</div>
+                    <el-select 
+                      v-model="pkgItem.platform" 
+                      :placeholder="t('settings.platform_placeholder')"
+                      size="small"
+                      filterable
+                      allow-create
+                      default-first-option
+                    >
+                      <el-option 
+                        v-for="platform in availablePlatforms" 
+                        :key="platform" 
+                        :label="platform" 
+                        :value="platform"
+                      />
+                    </el-select>
+                  </div>
+                  <el-button type="danger" size="small" circle @click="removePackage(keyword, pkgIndex)" class="mt-6">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
+                </div>
+                <el-button size="small" @click="addPackage(keyword)">{{ t('settings.add_package') }}</el-button>
+              </div>
             </div>
+            <el-button @click="addMapping" type="primary">{{ t('settings.add_mapping') }}</el-button>
           </div>
-          <el-button @click="addMapping" type="primary">{{ t('settings.add_mapping') }}</el-button>
         </div>
       </el-tab-pane>
       <el-tab-pane :label="t('settings.llm_prompt_template')" name="prompt">
@@ -244,4 +246,20 @@ const updatePackagePlatform = (keyword: string, index: number) => {
   }
 }
 </script>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #58a6ff;
+}
+</style>
 

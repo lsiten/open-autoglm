@@ -47,7 +47,44 @@ graph TD
 
 ## 3. Frontend Design (gui/web)
 
-### 3.1 UI Layout
+> **详细的前端项目结构文档请参考：** [前端项目结构文档](./frontend-structure.md)
+
+### 3.1 项目结构概述
+
+前端项目采用 Vue 3 + TypeScript + Composition API 架构，经过模块化优化后，主要文件结构如下：
+
+```
+gui/web/src/
+├── views/
+│   └── Dashboard.vue          # 主仪表板（~800行，已优化）
+├── components/dashboard/      # 仪表板组件（20+ 个组件）
+├── composables/              # 可复用逻辑（16 个 composables）
+├── utils/                     # 工具函数
+└── locales/                   # 国际化资源
+```
+
+### 3.2 核心架构
+
+**组件化设计：**
+- Dashboard.vue 作为主容器，整合所有子组件
+- 每个功能模块拆分为独立组件
+- 消息类型拆分为独立组件（InfoMessage、ThinkMessage、AnswerMessage 等）
+
+**Composables 模式：**
+- 业务逻辑提取到 composables，实现逻辑复用
+- 每个 composable 负责单一职责
+- 通过返回值暴露状态和方法
+
+**主要 Composables：**
+- `useWebSocket` - WebSocket 连接管理
+- `useScreenStream` - 屏幕流管理
+- `useMessageHandler` - 消息处理
+- `useTaskManagement` - 任务管理
+- `useDeviceManagement` - 设备管理
+- `useConfigManagement` - 配置管理
+- 等 16 个 composables
+
+### 3.3 UI Layout
 - **Sidebar:**
     - Device Selector (Dropdown/List).
     - Connection Status Indicator.

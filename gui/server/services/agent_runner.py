@@ -8,6 +8,8 @@ from typing import Optional, Dict, Any
 from phone_agent.agent import PhoneAgent, AgentConfig, StepResult
 from phone_agent.model import ModelConfig
 from phone_agent.device_factory import get_device_factory, set_device_type, DeviceType
+from phone_agent.adb.device import get_installed_packages
+from phone_agent.config.apps import APP_PACKAGES
 from .device_manager import device_manager
 from .task_manager import task_manager, AgentTask
 from .stream_manager import stream_manager
@@ -381,6 +383,64 @@ class AgentRunner:
                     screen_streamer.unregister_screen_change_listener(data["screen_change_callback"])
             return True
 
+    def _get_all_installed_apps(self, device_id: str, user_apps: list = None) -> list:
+        """
+        Get all installed apps including system apps for LLM.
+        
+        Args:
+            device_id: Device ID
+            user_apps: Optional list of user apps from frontend (may be None or incomplete)
+        
+        Returns:
+            List of all apps with name, package, and type fields
+        """
+        try:
+            # Get all packages including system apps
+            all_packages = get_installed_packages(device_id, include_system=True)
+            user_packages = get_installed_packages(device_id, include_system=False)
+            user_pkg_set = set(user_packages)
+            
+            # System packages = all packages - user packages
+            system_packages = set(all_packages) - user_pkg_set
+            
+            # Invert APP_PACKAGES for lookup: package -> name
+            pkg_to_name = {v: k for k, v in APP_PACKAGES.items()}
+            
+            # Get system app mappings from config to update system app names
+            system_app_mappings = config_manager.get_system_app_mappings()
+            # Create reverse mapping: package -> keyword (app name from config)
+            # If a package appears in multiple keywords, use the first one found
+            pkg_to_config_name = {}
+            for keyword, packages in system_app_mappings.items():
+                for pkg in packages:
+                    if pkg not in pkg_to_config_name:
+                        pkg_to_config_name[pkg] = keyword
+            
+            apps = []
+            added_pkgs = set()
+            
+            # 1. Add all user packages
+            for pkg in user_packages:
+                name = pkg_to_name.get(pkg, pkg)
+                is_supported = pkg in pkg_to_name
+                apps.append({"name": name, "package": pkg, "type": "supported" if is_supported else "other"})
+                added_pkgs.add(pkg)
+            
+            # 2. Add all system apps with names from config if available
+            for pkg in system_packages:
+                if pkg not in added_pkgs:
+                    # Priority: config name > APP_PACKAGES name > package name
+                    name = pkg_to_config_name.get(pkg) or pkg_to_name.get(pkg) or pkg
+                    is_supported = pkg in pkg_to_name
+                    apps.append({"name": name, "package": pkg, "type": "supported" if is_supported else "system"})
+                    added_pkgs.add(pkg)
+            
+            return apps
+        except Exception as e:
+            print(f"Error getting all installed apps: {e}")
+            # Fallback to user_apps if provided, or empty list
+            return user_apps if user_apps else []
+    
     def _run_agent_loop(self, task: AgentTask, stop_event: threading.Event, prompt_override: str = None, installed_apps: list = None, screen_change_event: threading.Event = None):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -420,12 +480,16 @@ class AgentRunner:
             llm_prompt_template = config_manager.get_llm_prompt_template()
             system_prompt = config_manager.get_system_prompt(lang="cn")
             
+            # Get all installed apps including system apps for LLM
+            # Frontend only sends user-installed apps, so we need to fetch all apps here
+            all_apps_for_llm = self._get_all_installed_apps(device_id, installed_apps)
+            
             agent = PhoneAgent(
                 model_config=model_config,
                 agent_config=AgentConfig(
                     device_id=device_id,
                     verbose=True,
-                    installed_apps=installed_apps,
+                    installed_apps=all_apps_for_llm,
                     system_app_mappings=system_app_mappings,
                     llm_prompt_template=llm_prompt_template,
                     system_prompt=system_prompt

@@ -1,4 +1,4 @@
-import { ref, type Ref, nextTick } from 'vue'
+import { ref, type Ref, nextTick, computed } from 'vue'
 import axios from 'axios'
 
 export function useInputEnhancement(
@@ -8,7 +8,12 @@ export function useInputEnhancement(
   inputRef: Ref<any>
 ) {
   const api = axios.create({ baseURL: apiBaseUrl })
-  const availableApps = ref<Array<{name: string, package?: string, type: string}>>([])
+  // allApps: contains all apps including system apps (for LLM)
+  const allApps = ref<Array<{name: string, package?: string, type: string}>>([])
+  // availableApps: filtered apps for frontend display (excludes system apps)
+  const availableApps = computed(() => {
+    return allApps.value.filter(app => app.type !== 'system')
+  })
   const showAppSuggestions = ref(false)
   const appSuggestionQuery = ref('')
   const attachments = ref<any[]>([])
@@ -17,10 +22,10 @@ export function useInputEnhancement(
   const fetchDeviceApps = async (deviceId: string) => {
     try {
       const res = await api.get(`/devices/${deviceId}/apps`)
-      availableApps.value = res.data.apps
+      allApps.value = res.data.apps
     } catch (e) {
       console.error('Failed to fetch device apps', e)
-      availableApps.value = []
+      allApps.value = []
     }
   }
 
@@ -99,6 +104,7 @@ export function useInputEnhancement(
 
   return {
     availableApps,
+    allApps,
     showAppSuggestions,
     appSuggestionQuery,
     attachments,

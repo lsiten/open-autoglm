@@ -531,6 +531,7 @@ const {
 // Initialize input enhancement first (needed by task management)
 const {
   availableApps,
+  allApps,
   showAppSuggestions,
   appSuggestionQuery,
   attachments,
@@ -544,7 +545,7 @@ const {
   removeAttachment
 } = useInputEnhancement(apiBaseUrl, activeDeviceId, input, inputRef)
 
-// Initialize task management (uses availableApps and fetchDeviceApps from above)
+// Initialize task management (uses allApps for LLM and fetchDeviceApps from above)
 const {
   startingTask,
   stoppingTask,
@@ -569,7 +570,7 @@ const {
   backgroundTasks,
   chatHistory,
   taskStatuses,
-  availableApps,
+  allApps,
   isBackgroundTask,
   activeTask,
   convertLogsToChat,
@@ -728,7 +729,7 @@ watch(activeDeviceId, (newId) => {
         backgroundTasks.value = []
         activeTaskId.value = null
         chatHistory.value = []
-        availableApps.value = []
+        allApps.value = []
         taskStatuses.value = {}
     }
 })

@@ -13,7 +13,7 @@ export function useTaskManagement(
   backgroundTasks: Ref<any[]>,
   chatHistory: Ref<any[]>,
   taskStatuses: Ref<Record<string, string>>,
-  availableApps: Ref<Array<{name: string, package?: string, type: string}>>,
+  allApps: Ref<Array<{name: string, package?: string, type: string}>>,
   isBackgroundTask: Ref<boolean>,
   activeTask: Ref<any>,
   convertLogsToChat: (logs: any[]) => any[],
@@ -309,13 +309,13 @@ export function useTaskManagement(
         })
       }
 
-      if (availableApps.value.length === 0 && activeDeviceId.value) {
+      if (allApps.value.length === 0 && activeDeviceId.value) {
         await fetchDeviceApps(activeDeviceId.value)
       }
 
       await api.post(`/tasks/${activeTaskId.value}/start`, { 
         prompt,
-        installed_apps: availableApps.value.map(a => ({ name: a.name, package: a.package }))
+        installed_apps: allApps.value.map(a => ({ name: a.name, package: a.package }))
       })
       if (activeTaskId.value) {
         taskStatuses.value[activeTaskId.value] = 'running'
@@ -337,12 +337,12 @@ export function useTaskManagement(
     
     startingTask.value = true
     try {
-      if (availableApps.value.length === 0 && activeDeviceId.value) {
+      if (allApps.value.length === 0 && activeDeviceId.value) {
         await fetchDeviceApps(activeDeviceId.value)
       }
       
       await api.post(`/tasks/${activeTaskId.value}/start`, {
-        installed_apps: availableApps.value.map(a => ({ name: a.name, package: a.package }))
+        installed_apps: allApps.value.map(a => ({ name: a.name, package: a.package }))
       })
       if (activeTaskId.value) {
         taskStatuses.value[activeTaskId.value] = 'running'
