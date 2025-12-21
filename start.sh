@@ -1,0 +1,275 @@
+#!/bin/bash
+
+# Open-AutoGLM 一键启动脚本
+# 用于同时启动后端和前端服务
+
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 项目根目录
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
+
+# PID 文件路径
+BACKEND_PID_FILE="$PROJECT_ROOT/.backend.pid"
+FRONTEND_PID_FILE="$PROJECT_ROOT/.frontend.pid"
+
+# 全局变量
+DEV_MODE="false"
+
+# 清理函数
+cleanup() {
+    echo -e "\n${YELLOW}正在停止服务...${NC}"
+    
+    if [ -f "$BACKEND_PID_FILE" ]; then
+        BACKEND_PID=$(cat "$BACKEND_PID_FILE")
+        if ps -p "$BACKEND_PID" > /dev/null 2>&1; then
+            echo -e "${BLUE}停止后端服务 (PID: $BACKEND_PID)${NC}"
+            kill "$BACKEND_PID" 2>/dev/null || true
+        fi
+        rm -f "$BACKEND_PID_FILE"
+    fi
+    
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        FRONTEND_PID=$(cat "$FRONTEND_PID_FILE")
+        if ps -p "$FRONTEND_PID" > /dev/null 2>&1; then
+            echo -e "${BLUE}停止前端服务 (PID: $FRONTEND_PID)${NC}"
+            kill "$FRONTEND_PID" 2>/dev/null || true
+        fi
+        rm -f "$FRONTEND_PID_FILE"
+    fi
+    
+    # 清理可能的残留进程
+    pkill -f "uvicorn.*gui.server.app" 2>/dev/null || true
+    pkill -f "vite.*--host" 2>/dev/null || true
+    
+    echo -e "${GREEN}清理完成${NC}"
+    exit 0
+}
+
+# 注册清理函数
+trap cleanup SIGINT SIGTERM EXIT
+
+# 检查 Python
+check_python() {
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}错误: 未找到 Python3${NC}"
+        echo "请先安装 Python 3.10 或更高版本"
+        exit 1
+    fi
+    
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+    echo -e "${GREEN}✓ Python 版本: $PYTHON_VERSION${NC}"
+}
+
+# 检查 Node.js 和 npm
+check_node() {
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}错误: 未找到 Node.js${NC}"
+        echo "请先安装 Node.js"
+        exit 1
+    fi
+    
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}错误: 未找到 npm${NC}"
+        echo "请先安装 npm"
+        exit 1
+    fi
+    
+    NODE_VERSION=$(node --version)
+    NPM_VERSION=$(npm --version)
+    echo -e "${GREEN}✓ Node.js 版本: $NODE_VERSION${NC}"
+    echo -e "${GREEN}✓ npm 版本: $NPM_VERSION${NC}"
+}
+
+# 检查依赖
+check_dependencies() {
+    echo -e "${BLUE}检查依赖...${NC}"
+    
+    # 检查 Python 依赖
+    if ! python3 -c "import uvicorn" 2>/dev/null; then
+        echo -e "${YELLOW}警告: 未找到 uvicorn，正在安装依赖...${NC}"
+        pip install -r requirements.txt
+    fi
+    
+    # 检查前端依赖
+    if [ ! -d "gui/web/node_modules" ]; then
+        echo -e "${YELLOW}警告: 未找到前端依赖，正在安装...${NC}"
+        cd gui/web
+        npm install
+        cd "$PROJECT_ROOT"
+    fi
+    
+    echo -e "${GREEN}✓ 依赖检查完成${NC}"
+}
+
+# 检查 ADB 连接（可选）
+check_adb() {
+    if command -v adb &> /dev/null; then
+        DEVICES=$(adb devices 2>/dev/null | grep -v "List" | grep "device$" | wc -l | tr -d ' ')
+        if [ "$DEVICES" -gt 0 ]; then
+            echo -e "${GREEN}✓ 检测到 $DEVICES 个已连接的设备${NC}"
+        else
+            echo -e "${YELLOW}⚠ 未检测到已连接的设备（可选，不影响启动）${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ 未找到 ADB 工具（可选，不影响启动）${NC}"
+    fi
+}
+
+# 启动后端服务
+start_backend() {
+    echo -e "\n${BLUE}启动后端服务...${NC}"
+    
+    if [ "$DEV_MODE" = "true" ]; then
+        echo -e "${YELLOW}开发模式: 启用自动重载${NC}"
+    fi
+    
+    # 检查端口是否被占用
+    if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+        echo -e "${YELLOW}警告: 端口 8000 已被占用${NC}"
+        echo "请先停止占用该端口的服务，或修改 run_gui.py 中的端口配置"
+        exit 1
+    fi
+    
+    # 构建启动命令
+    BACKEND_CMD="python3 run_gui.py --backend-only"
+    if [ "$DEV_MODE" = "true" ]; then
+        BACKEND_CMD="$BACKEND_CMD --dev"
+    fi
+    
+    # 启动后端（后台运行）
+    $BACKEND_CMD > .backend.log 2>&1 &
+    BACKEND_PID=$!
+    echo "$BACKEND_PID" > "$BACKEND_PID_FILE"
+    
+    # 等待后端启动
+    echo -e "${BLUE}等待后端服务启动...${NC}"
+    sleep 3
+    
+    # 检查后端是否成功启动
+    if ps -p "$BACKEND_PID" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ 后端服务已启动 (PID: $BACKEND_PID)${NC}"
+        echo -e "${GREEN}  后端地址: http://127.0.0.1:8000${NC}"
+        if [ "$DEV_MODE" = "true" ]; then
+            echo -e "${YELLOW}  开发模式: 代码修改后会自动重载${NC}"
+        fi
+    else
+        echo -e "${RED}错误: 后端服务启动失败${NC}"
+        echo "请查看 .backend.log 文件获取详细信息"
+        exit 1
+    fi
+}
+
+# 启动前端服务
+start_frontend() {
+    echo -e "\n${BLUE}启动前端服务...${NC}"
+    
+    cd gui/web
+    
+    # 启动前端（后台运行）
+    npm run dev -- --host > ../../.frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    echo "$FRONTEND_PID" > "$PROJECT_ROOT/$FRONTEND_PID_FILE"
+    
+    cd "$PROJECT_ROOT"
+    
+    # 等待前端启动
+    echo -e "${BLUE}等待前端服务启动...${NC}"
+    sleep 5
+    
+    # 检查前端是否成功启动
+    if ps -p "$FRONTEND_PID" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ 前端服务已启动 (PID: $FRONTEND_PID)${NC}"
+        echo -e "${GREEN}  前端地址: http://localhost:5173${NC}"
+    else
+        echo -e "${RED}错误: 前端服务启动失败${NC}"
+        echo "请查看 .frontend.log 文件获取详细信息"
+        exit 1
+    fi
+}
+
+# 解析命令行参数
+parse_args() {
+    DEV_MODE="false"
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dev|-d)
+                DEV_MODE="true"
+                shift
+                ;;
+            --help|-h)
+                echo "用法: $0 [选项]"
+                echo ""
+                echo "选项:"
+                echo "  --dev, -d    启动开发模式（启用自动重载）"
+                echo "  --help, -h    显示此帮助信息"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}未知参数: $1${NC}"
+                echo "使用 --help 查看帮助信息"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# 主函数
+main() {
+    # 解析命令行参数
+    parse_args "$@"
+    
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}  Open-AutoGLM 一键启动脚本${NC}"
+    if [ "$DEV_MODE" = "true" ]; then
+        echo -e "${YELLOW}  开发模式 (自动重载已启用)${NC}"
+    fi
+    echo -e "${BLUE}========================================${NC}\n"
+    
+    # 检查环境
+    check_python
+    check_node
+    check_dependencies
+    check_adb
+    
+    echo ""
+    
+    # 启动服务
+    start_backend
+    start_frontend
+    
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  服务启动成功！${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${BLUE}后端地址: ${GREEN}http://127.0.0.1:8000${NC}"
+    echo -e "${BLUE}前端地址: ${GREEN}http://localhost:5173${NC}"
+    if [ "$DEV_MODE" = "true" ]; then
+        echo -e "${YELLOW}开发模式: 代码修改后会自动重载${NC}"
+    fi
+    echo ""
+    echo -e "${YELLOW}提示:${NC}"
+    echo -e "  - 按 Ctrl+C 停止所有服务"
+    echo -e "  - 后端日志: ${BLUE}.backend.log${NC}"
+    echo -e "  - 前端日志: ${BLUE}.frontend.log${NC}"
+    if [ "$DEV_MODE" = "true" ]; then
+        echo -e "  - 开发模式: 修改代码后后端会自动重载"
+    fi
+    echo ""
+    echo -e "${BLUE}正在运行中...${NC}"
+    
+    # 保持脚本运行
+    wait
+}
+
+# 运行主函数
+main "$@"
+

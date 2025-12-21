@@ -1,0 +1,206 @@
+@echo off
+REM Open-AutoGLM 一键启动脚本 (Windows)
+REM 用于同时启动后端和前端服务
+
+setlocal enabledelayedexpansion
+
+REM 项目根目录
+set "PROJECT_ROOT=%~dp0"
+cd /d "%PROJECT_ROOT%"
+
+REM 默认值
+set "DEV_MODE=0"
+
+REM 解析命令行参数
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--dev" (
+    set "DEV_MODE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="-d" (
+    set "DEV_MODE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--help" (
+    echo 用法: %~nx0 [选项]
+    echo.
+    echo 选项:
+    echo   --dev, -d    启动开发模式（启用自动重载）
+    echo   --help       显示此帮助信息
+    exit /b 0
+)
+if /i "%~1"=="-h" (
+    echo 用法: %~nx0 [选项]
+    echo.
+    echo 选项:
+    echo   --dev, -d    启动开发模式（启用自动重载）
+    echo   --help       显示此帮助信息
+    exit /b 0
+)
+echo [错误] 未知参数: %~1
+echo 使用 --help 查看帮助信息
+exit /b 1
+:args_done
+
+REM PID 文件路径
+set "BACKEND_PID_FILE=%PROJECT_ROOT%.backend.pid"
+set "FRONTEND_PID_FILE=%PROJECT_ROOT%.frontend.pid"
+
+echo ========================================
+echo   Open-AutoGLM 一键启动脚本
+if "%DEV_MODE%"=="1" (
+    echo   开发模式 (自动重载已启用)
+)
+echo ========================================
+echo.
+
+REM 检查 Python
+where python >nul 2>&1
+if errorlevel 1 (
+    echo [错误] 未找到 Python
+    echo 请先安装 Python 3.10 或更高版本
+    pause
+    exit /b 1
+)
+
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo [错误] Python 未正确安装
+    pause
+    exit /b 1
+)
+
+for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYTHON_VERSION=%%v
+echo [✓] Python 版本: %PYTHON_VERSION%
+
+REM 检查 Node.js 和 npm
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [错误] 未找到 Node.js
+    echo 请先安装 Node.js
+    pause
+    exit /b 1
+)
+
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [错误] 未找到 npm
+    echo 请先安装 npm
+    pause
+    exit /b 1
+)
+
+for /f %%v in ('node --version') do set NODE_VERSION=%%v
+for /f %%v in ('npm --version') do set NPM_VERSION=%%v
+echo [✓] Node.js 版本: %NODE_VERSION%
+echo [✓] npm 版本: %NPM_VERSION%
+
+echo.
+echo 检查依赖...
+
+REM 检查 Python 依赖
+python -c "import uvicorn" >nul 2>&1
+if errorlevel 1 (
+    echo [警告] 未找到 uvicorn，正在安装依赖...
+    pip install -r requirements.txt
+)
+
+REM 检查前端依赖
+if not exist "gui\web\node_modules" (
+    echo [警告] 未找到前端依赖，正在安装...
+    cd gui\web
+    call npm install
+    cd ..\..
+)
+
+echo [✓] 依赖检查完成
+
+REM 检查 ADB 连接（可选）
+where adb >nul 2>&1
+if not errorlevel 1 (
+    adb devices >nul 2>&1
+    if not errorlevel 1 (
+        echo [✓] ADB 工具已就绪
+    ) else (
+        echo [警告] 未检测到已连接的设备（可选，不影响启动）
+    )
+) else (
+    echo [警告] 未找到 ADB 工具（可选，不影响启动）
+)
+
+echo.
+echo 启动后端服务...
+
+if "%DEV_MODE%"=="1" (
+    echo [开发模式] 启用自动重载
+)
+
+REM 检查端口是否被占用（Windows 方式）
+netstat -ano | findstr ":8000" | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo [警告] 端口 8000 已被占用
+    echo 请先停止占用该端口的服务，或修改 run_gui.py 中的端口配置
+    pause
+    exit /b 1
+)
+
+REM 构建启动命令
+set "BACKEND_CMD=python run_gui.py --backend-only"
+if "%DEV_MODE%"=="1" (
+    set "BACKEND_CMD=python run_gui.py --backend-only --dev"
+)
+
+REM 启动后端（后台运行）
+start /b %BACKEND_CMD% > .backend.log 2>&1
+timeout /t 3 /nobreak >nul
+
+echo [✓] 后端服务已启动
+echo    后端地址: http://127.0.0.1:8000
+if "%DEV_MODE%"=="1" (
+    echo    开发模式: 代码修改后会自动重载
+)
+
+echo.
+echo 启动前端服务...
+
+cd gui\web
+
+REM 启动前端（新窗口运行，方便查看日志）
+start "Open-AutoGLM Frontend" cmd /k "npm run dev -- --host"
+
+cd ..\..
+
+timeout /t 5 /nobreak >nul
+
+echo [✓] 前端服务已启动
+echo    前端地址: http://localhost:5173
+
+echo.
+echo ========================================
+echo   服务启动成功！
+echo ========================================
+echo 后端地址: http://127.0.0.1:8000
+echo 前端地址: http://localhost:5173
+if "%DEV_MODE%"=="1" (
+    echo 开发模式: 代码修改后会自动重载
+)
+echo.
+echo 提示:
+echo   - 关闭此窗口将停止后端服务
+echo   - 前端服务在独立窗口中运行
+echo   - 后端日志: .backend.log
+if "%DEV_MODE%"=="1" (
+    echo   - 开发模式: 修改代码后后端会自动重载
+)
+echo.
+echo 正在运行中...
+echo 按 Ctrl+C 停止后端服务
+
+REM 保持脚本运行
+:loop
+timeout /t 1 /nobreak >nul
+goto loop
+
