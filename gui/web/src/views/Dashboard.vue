@@ -18,7 +18,8 @@
       @show-connection-guide="showConnectionGuide = true"
       @show-config="showConfig = true"
       @show-app-matching-config="loadAppMatchingConfig(); showAppMatchingConfig = true"
-      @show-system-prompt-config="loadSystemPromptConfig(); showSystemPromptConfig = true"
+      @show-system-prompt-config="(deviceId) => { systemPromptDeviceId = deviceId; showSystemPromptConfig = true }"
+      @show-device-system-prompt-config="(deviceId) => { systemPromptDeviceId = deviceId; showSystemPromptConfig = true }"
       @device-renamed="handleDeviceRenamed"
     />
 
@@ -131,7 +132,7 @@
                   <ConfirmMessage
                     v-if="msg.type === 'confirm'"
                     :message="msg"
-                    @action="handleCardAction"
+                    @action="(data) => handleCardAction(data.msg, data.option)"
                   />
 
                     <!-- Interaction: Input -->
@@ -139,6 +140,14 @@
                     v-if="msg.type === 'input'"
                     :message="msg"
                     @input="handleCardInput"
+                  />
+
+                    <!-- Interaction: Click Annotation -->
+                  <ClickAnnotationMessage
+                    v-if="msg.type === 'click_annotation'"
+                    :message="msg"
+                    :latest-screenshot="latestScreenshot"
+                    @annotation="handleCardAnnotation"
                   />
                 </template>
              </div>
@@ -211,6 +220,7 @@
     <SystemPromptConfigDialog
       v-model="showSystemPromptConfig"
       :api-base-url="apiBaseUrl"
+      :device-id="systemPromptDeviceId"
     />
 
     <!-- Create/Edit Task Dialog -->
@@ -284,6 +294,7 @@ import AnswerMessage from '../components/dashboard/messages/AnswerMessage.vue'
 import ErrorMessage from '../components/dashboard/messages/ErrorMessage.vue'
 import ConfirmMessage from '../components/dashboard/messages/ConfirmMessage.vue'
 import InputMessage from '../components/dashboard/messages/InputMessage.vue'
+import ClickAnnotationMessage from '../components/dashboard/messages/ClickAnnotationMessage.vue'
 import { formatThink, formatAnswer } from '../utils/messageFormatter'
 import { detectPlatform, availablePlatforms } from '../utils/platformDetector'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -308,6 +319,7 @@ const { t, locale } = useI18n()
 const sidebarOpen = ref(true)
 const input = ref('')
 const activeDeviceId = ref('')
+const systemPromptDeviceId = ref<string | null>(null)  // null for global, device_id for device-specific
 const sending = ref(false)
 // Status management: store status per task/session ID
 const taskStatuses = ref<Record<string, string>>({}) // taskId/sessionId -> status
@@ -430,6 +442,7 @@ const {
       content: data.data.content,
       options: data.data.options,
       placeholder: data.data.placeholder,
+      screenshot: data.data.screenshot,
       sessionId: activeTaskId.value,
       submitted: false,
       inputValue: '',
@@ -621,7 +634,8 @@ const {
 // Initialize interaction handlers
 const {
   handleCardAction,
-  handleCardInput
+  handleCardInput,
+  handleCardAnnotation
 } = useInteraction(apiBaseUrl, activeTaskId)
 
 // Initialize model config
@@ -690,8 +704,15 @@ const sendMessage = () => sendMessageComposable(input, sending)
 onMounted(async () => {
   const savedConfig = await db.getConfig()
   if (savedConfig) {
-    config.value = { ...config.value, ...savedConfig }
-    if (savedConfig.selectedProvider) selectedProvider.value = savedConfig.selectedProvider
+    // Restore configuration, preserving all fields including apiKey
+    console.log('Loading saved config:', savedConfig)
+    if (savedConfig.baseUrl) config.value.baseUrl = savedConfig.baseUrl
+    if (savedConfig.model) config.value.model = savedConfig.model
+    if (savedConfig.apiKey !== undefined) config.value.apiKey = savedConfig.apiKey  // Preserve API key even if empty
+    if (savedConfig.selectedProvider) {
+      selectedProvider.value = savedConfig.selectedProvider
+    }
+    console.log('Restored config:', config.value)
     syncConfigToBackend()
   }
 

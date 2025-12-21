@@ -1,7 +1,7 @@
 """Device factory for selecting ADB or HDC based on device type."""
 
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 
 class DeviceType(Enum):
@@ -60,9 +60,24 @@ class DeviceFactory:
             return self.module.is_screen_on(device_id)
         return True # Default assume on if not implemented (e.g. HDC/WebRTC)
 
-    def get_current_app(self, device_id: str | None = None) -> str:
-        """Get current app name."""
-        return self.module.get_current_app(device_id)
+    def get_current_app(self, device_id: str | None = None, installed_apps: list = None) -> str:
+        """Get current app name.
+        
+        Args:
+            device_id: Optional device ID.
+            installed_apps: Optional list of installed apps with 'name' and 'package' fields.
+                          If provided, will match package names to get app names.
+        """
+        # Check if the module's get_current_app supports installed_apps parameter
+        if hasattr(self.module, 'get_current_app'):
+            func = getattr(self.module, 'get_current_app')
+            import inspect
+            sig = inspect.signature(func)
+            if 'installed_apps' in sig.parameters:
+                return func(device_id, installed_apps=installed_apps)
+            else:
+                return func(device_id)
+        return "System Home"
 
     def tap(
         self, x: int, y: int, device_id: str | None = None, delay: float | None = None
@@ -152,6 +167,38 @@ class DeviceFactory:
             return HDCConnection
         else:
             raise ValueError(f"Unknown device type: {self.device_type}")
+
+    def is_package_installed(self, package_name: str, device_id: str | None = None) -> bool:
+        """Check if a package is installed."""
+        if hasattr(self.module, "is_package_installed"):
+            return self.module.is_package_installed(package_name, device_id)
+        return False
+
+    def get_package_install_status(self, package_name: str, device_id: str | None = None) -> dict:
+        """Get detailed installation status of a package."""
+        if hasattr(self.module, "get_package_install_status"):
+            return self.module.get_package_install_status(package_name, device_id)
+        return {
+            "installed": False,
+            "installing": False,
+            "progress": None,
+            "status": "不支持"
+        }
+
+    def wait_for_package_installation(
+        self,
+        package_name: str,
+        device_id: str | None = None,
+        timeout: float = 300.0,
+        check_interval: float = 2.0,
+        progress_callback: Callable[[dict], None] | None = None
+    ) -> bool:
+        """Wait for a package to be installed, monitoring installation progress."""
+        if hasattr(self.module, "wait_for_package_installation"):
+            return self.module.wait_for_package_installation(
+                package_name, device_id, timeout, check_interval, progress_callback
+            )
+        return False
 
 
 # Global device factory instance

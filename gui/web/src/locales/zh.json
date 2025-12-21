@@ -9,10 +9,14 @@
     "confirm": "确认",
     "deny": "拒绝",
     "allow": "允许",
+    "clear": "清除",
     "error_prefix": "错误：",
     "create": "创建",
     "rename": "重命名",
-    "enter_new_name": "输入新名称"
+    "enter_new_name": "输入新名称",
+    "device_specific": "设备专用",
+    "copy": "复制",
+    "copied": "已复制"
   },
   "sidebar": {
     "devices": "设备列表",
@@ -23,6 +27,7 @@
     "model_settings": "模型设置",
     "app_matching_settings": "应用匹配设置",
     "system_prompt_settings": "系统提示词设置",
+    "device_system_prompt": "设备提示词",
     "connected": "已连接服务器",
     "disconnected": "服务器未连接",
     "offline": "离线",
@@ -53,7 +58,12 @@
     "selected": "已选择：",
     "confirmation_required": "需要确认",
     "input_required": "需要输入",
-    "enter_value": "请输入..."
+    "click_annotation_required": "需要标注点击位置",
+    "enter_value": "请输入...",
+    "annotated_position": "标注位置",
+    "operation_description": "操作说明",
+    "enter_operation_description": "请输入操作说明（可选）",
+    "click_annotation_hint": "在截图上点击以标注要点击的位置，可以输入操作说明以便后续学习"
   },
   "mirror": {
     "title": "设备镜像",
@@ -103,7 +113,22 @@
     "system_prompt_desc": "配置AI智能体的系统提示词，用于指导AI的行为和决策。可以使用 {date} 占位符自动插入当前日期。",
     "system_prompt_placeholder": "请输入系统提示词...",
     "system_prompt_variables": "可用变量",
-    "system_prompt_variables_desc": "将自动替换为当前日期"
+    "system_prompt_variables_desc": "将自动替换为当前日期",
+    "prompt_assistant": "提示词助手",
+    "prompt_assistant_title": "提示词优化助手",
+    "prompt_assistant_desc": "根据您的需求优化系统提示词，助手会理解当前提示词的所有规则，并在此基础上进行优化。",
+    "prompt_assistant_request_label": "优化需求",
+    "prompt_assistant_request_placeholder": "请描述您希望如何优化提示词，例如：\n- 增加对特定场景的处理规则\n- 优化某些规则的表述\n- 添加新的功能要求\n- 改进提示词的清晰度",
+    "prompt_assistant_request_required": "请输入优化需求",
+    "prompt_assistant_optimize": "开始优化",
+    "prompt_assistant_optimizing": "正在优化提示词，请稍候...",
+    "prompt_assistant_result_label": "优化后的提示词",
+    "prompt_assistant_result_hint": "优化完成！您可以复制或直接应用此提示词。",
+    "prompt_assistant_apply": "应用优化",
+    "prompt_assistant_applied": "已应用优化后的提示词",
+    "prompt_assistant_success": "提示词优化成功",
+    "prompt_assistant_error": "优化失败，请稍后重试",
+    "prompt_assistant_error_no_result": "未能生成优化结果"
   },
   "guide": {
     "title": "连接您的设备",
@@ -184,7 +209,7 @@
     "description": "启用或禁用敏感操作的自动执行。禁用的操作将需要人工确认。",
     "install_app": "安装应用",
     "payment": "支付操作",
-    "reply_wechat": "回复微信",
+    "wechat_reply": "回复微信",
     "send_sms": "发送短信",
     "make_call": "拨打电话"
   },
@@ -214,7 +239,8 @@
     "failed_fetch_apps": "获取应用列表失败",
     "failed_send_interaction": "发送交互响应失败",
     "failed_start_task": "启动任务失败",
-    "failed_stop_task": "停止任务失败"
+    "failed_stop_task": "停止任务失败",
+    "failed_copy": "复制失败"
   },
   "success": {
     "device_removed": "设备已移除",

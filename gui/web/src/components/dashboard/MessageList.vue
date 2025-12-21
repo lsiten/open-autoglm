@@ -72,6 +72,14 @@
             :message="msg"
             @input="$emit('card-input', $event)"
           />
+
+          <!-- Interaction: Click Annotation -->
+          <ClickAnnotationMessage
+            v-if="msg.type === 'click_annotation'"
+            :message="msg"
+            :latest-screenshot="latestScreenshot"
+            @annotation="$emit('card-annotation', $event)"
+          />
         </template>
       </div>
     </div>
@@ -88,17 +96,20 @@ import AnswerMessage from './messages/AnswerMessage.vue'
 import ErrorMessage from './messages/ErrorMessage.vue'
 import ConfirmMessage from './messages/ConfirmMessage.vue'
 import InputMessage from './messages/InputMessage.vue'
+import ClickAnnotationMessage from './messages/ClickAnnotationMessage.vue'
 
 defineProps<{
   messages: any[]
   isLoadingMore?: boolean
   collapseState: Record<number, { thought?: boolean, screenshot?: boolean, info?: boolean }>
+  latestScreenshot?: string
 }>()
 
 defineEmits<{
   'preview-image': [url: string]
   'card-action': [data: { msg: any, option: any }]
   'card-input': [data: { msg: any }]
+  'card-annotation': [data: { msg: any, annotation: { x: number, y: number, description: string } }]
   'scroll': [event: Event]
 }>()
 

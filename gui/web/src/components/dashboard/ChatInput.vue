@@ -56,8 +56,7 @@
       <el-input
         ref="inputRef"
         :model-value="input"
-        @update:model-value="$emit('update:input', $event)"
-        @input="$emit('input-change', ($event.target as HTMLInputElement).value)"
+        @update:model-value="(value: string) => { $emit('update:input', value); $emit('input-change', value); }"
         :disabled="agentStatus === 'running' || !activeDeviceId"
         :placeholder="activeDeviceId ? t('chat.input_placeholder') : t('chat.select_device_placeholder')"
         class="custom-input !text-base w-full"

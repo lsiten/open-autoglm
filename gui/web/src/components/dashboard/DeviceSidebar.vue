@@ -93,6 +93,20 @@
               <span>{{ dev.connection_type }}</span>
               <span v-if="dev.status === 'offline'" class="text-red-400 italic">{{ t('sidebar.offline') || 'Offline' }}</span>
             </div>
+            <!-- Device-specific system prompt config button (always visible) -->
+            <div 
+              v-if="dev.status !== 'offline'"
+              class="mt-2 pt-2 border-t border-gray-700/50"
+              @click.stop
+            >
+              <div 
+                @click="$emit('show-device-system-prompt-config', dev.id)"
+                class="flex items-center gap-2 p-1.5 rounded hover:bg-gray-700/50 cursor-pointer transition-colors"
+              >
+                <el-icon class="text-gray-500 hover:text-blue-400"><Document /></el-icon>
+                <span class="text-[10px] text-gray-500 hover:text-gray-300">{{ t('sidebar.device_system_prompt') }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -115,7 +129,8 @@
           </div>
           <el-icon class="text-gray-600 group-hover:text-gray-400"><ArrowRight /></el-icon>
         </div>
-        <div @click="$emit('show-system-prompt-config')" class="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 cursor-pointer group transition-colors">
+        <!-- Global system prompt config (no device_id) -->
+        <div @click="$emit('show-system-prompt-config', null)" class="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 cursor-pointer group transition-colors">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center group-hover:bg-gray-700 transition-colors">
               <el-icon><Document /></el-icon>
@@ -164,7 +179,8 @@ const emit = defineEmits<{
   'show-connection-guide': []
   'show-config': []
   'show-app-matching-config': []
-  'show-system-prompt-config': []
+  'show-system-prompt-config': [deviceId: string | null]  // null for global, device_id for device-specific
+  'show-device-system-prompt-config': [deviceId: string]  // Device-specific system prompt config
   'device-renamed': [device: any, newName: string]
 }>()
 

@@ -20,7 +20,32 @@ export function useImagePreview(chatHistory: Ref<any[]>) {
     }
     
     sessionImages.value = images
-    const index = images.indexOf(imageUrl)
+    
+    // Find the index of the clicked image
+    // Handle both full data URLs and base64 strings
+    let index = images.indexOf(imageUrl)
+    
+    // If not found, try to match by comparing the base64 part
+    if (index < 0) {
+      // Extract base64 part from imageUrl (could be full data URL or just base64)
+      const urlBase64 = imageUrl.includes(',') 
+        ? imageUrl.split(',')[1] 
+        : imageUrl.replace(/^data:image\/[^;]+;base64,/, '')
+      
+      index = images.findIndex((img) => {
+        const imgBase64 = img.includes(',') 
+          ? img.split(',')[1] 
+          : img.replace(/^data:image\/[^;]+;base64,/, '')
+        return imgBase64 === urlBase64
+      })
+    }
+    
+    // If still not found, try exact string match after normalization
+    if (index < 0) {
+      const normalizedUrl = imageUrl.trim()
+      index = images.findIndex((img) => img.trim() === normalizedUrl)
+    }
+    
     imagePreviewIndex.value = index >= 0 ? index : 0
     imagePreviewUrl.value = sessionImages.value[imagePreviewIndex.value]
     imagePreviewVisible.value = true

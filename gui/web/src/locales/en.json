@@ -9,10 +9,14 @@
     "confirm": "Confirm",
     "deny": "Deny",
     "allow": "Allow",
+    "clear": "Clear",
     "error_prefix": "Error: ",
     "create": "Create",
     "rename": "Rename",
-    "enter_new_name": "Enter new name"
+    "enter_new_name": "Enter new name",
+    "device_specific": "Device Specific",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "sidebar": {
     "devices": "DEVICES",
@@ -23,6 +27,7 @@
     "model_settings": "Model Settings",
     "app_matching_settings": "App Matching Settings",
     "system_prompt_settings": "System Prompt Settings",
+    "device_system_prompt": "Device Prompt",
     "connected": "Connected to Server",
     "disconnected": "Disconnected",
     "offline": "Offline",
@@ -59,6 +64,11 @@
     "selected": "Selected: ",
     "confirmation_required": "Confirmation Required",
     "input_required": "Input Required",
+    "click_annotation_required": "Click Annotation Required",
+    "annotated_position": "Annotated Position",
+    "operation_description": "Operation Description",
+    "enter_operation_description": "Enter operation description (optional)",
+    "click_annotation_hint": "Click on the screenshot to annotate the position to tap, you can enter an operation description for future learning",
     "enter_value": "Enter value..."
   },
   "mirror": {
@@ -109,7 +119,22 @@
     "system_prompt_desc": "Configure the system prompt for the AI agent to guide its behavior and decisions. You can use the {date} placeholder to automatically insert the current date.",
     "system_prompt_placeholder": "Enter system prompt...",
     "system_prompt_variables": "Available Variables",
-    "system_prompt_variables_desc": "Will be automatically replaced with the current date"
+    "system_prompt_variables_desc": "Will be automatically replaced with the current date",
+    "prompt_assistant": "Prompt Assistant",
+    "prompt_assistant_title": "Prompt Optimization Assistant",
+    "prompt_assistant_desc": "Optimize system prompts based on your needs. The assistant understands all rules in the current prompt and optimizes on that basis.",
+    "prompt_assistant_request_label": "Optimization Request",
+    "prompt_assistant_request_placeholder": "Describe how you want to optimize the prompt, for example:\n- Add rules for specific scenarios\n- Optimize the wording of certain rules\n- Add new functional requirements\n- Improve prompt clarity",
+    "prompt_assistant_request_required": "Please enter optimization request",
+    "prompt_assistant_optimize": "Optimize",
+    "prompt_assistant_optimizing": "Optimizing prompt, please wait...",
+    "prompt_assistant_result_label": "Optimized Prompt",
+    "prompt_assistant_result_hint": "Optimization complete! You can copy or directly apply this prompt.",
+    "prompt_assistant_apply": "Apply Optimization",
+    "prompt_assistant_applied": "Optimized prompt applied",
+    "prompt_assistant_success": "Prompt optimized successfully",
+    "prompt_assistant_error": "Optimization failed, please try again later",
+    "prompt_assistant_error_no_result": "Failed to generate optimization result"
   },
   "guide": {
     "title": "Connect Your Device",
@@ -190,7 +215,7 @@
     "description": "Enable or disable automatic execution for sensitive actions. Disabled actions will require manual confirmation.",
     "install_app": "Install Apps",
     "payment": "Payment Operations",
-    "reply_wechat": "Reply WeChat",
+    "wechat_reply": "Reply WeChat",
     "send_sms": "Send SMS",
     "make_call": "Make Phone Call"
   },
@@ -221,7 +246,8 @@
     "failed_fetch_apps": "Failed to fetch device apps",
     "failed_send_interaction": "Failed to send interaction response",
     "failed_start_task": "Failed to start task",
-    "failed_stop_task": "Failed to stop task"
+    "failed_stop_task": "Failed to stop task",
+    "failed_copy": "Failed to copy"
   },
   "success": {
     "device_removed": "Device removed",

@@ -19,10 +19,12 @@ class Screenshot:
     """Represents a captured screenshot."""
 
     base64_data: str
-    width: int
-    height: int
+    width: int  # Actual image width (may be resized)
+    height: int  # Actual image height (may be resized)
     is_sensitive: bool = False
     jpeg_data: bytes | None = None
+    original_width: int | None = None  # Original screen width before resize
+    original_height: int | None = None  # Original screen height before resize
 
 
 def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int = 75, max_width: int = 720) -> Screenshot:
@@ -193,12 +195,19 @@ def _get_screenshot_raw(device_id: str | None, timeout: int, quality: int, max_w
 
 
 def _process_image(img: Image.Image, width: int, height: int, quality: int, max_width: int) -> Screenshot:
+    # Store original dimensions before any resizing
+    original_width = width
+    original_height = height
+    
     # Optimize: Resize if too large to speed up transfer/processing for local model
     if width > max_width: # Aggressive resize for mirror
         scale = max_width / width # Target max_width
         new_width = max_width
         new_height = int(height * scale)
         img = img.resize((new_width, new_height), Image.Resampling.BILINEAR)
+        # Use resized dimensions for the screenshot object
+        width = new_width
+        height = new_height
     
     buffered = BytesIO()
     # Use JPEG for significantly faster encoding and smaller transfer size
@@ -212,10 +221,12 @@ def _process_image(img: Image.Image, width: int, height: int, quality: int, max_
 
     return Screenshot(
         base64_data=base64_data, 
-        width=width, 
-        height=height, 
+        width=width,  # Actual image width (may be resized)
+        height=height,  # Actual image height (may be resized)
         is_sensitive=False,
-        jpeg_data=jpeg_bytes
+        jpeg_data=jpeg_bytes,
+        original_width=original_width if width != original_width else None,  # Only store if resized
+        original_height=original_height if height != original_height else None  # Only store if resized
     )
 
 

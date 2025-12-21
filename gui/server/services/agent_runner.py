@@ -82,6 +82,18 @@ class AgentRunner:
         event = threading.Event()
         self.pending_interactions[task_id] = {"event": event, "response": None}
         
+        # Map permission keys to user-friendly messages
+        permission_messages = {
+            "install_app": "安装应用",
+            "payment": "支付操作",
+            "wechat_reply": "回复微信",
+            "send_sms": "发送短信",
+            "make_call": "拨打电话"
+        }
+        
+        # Get permission name for title
+        permission_name = permission_messages.get(permission_key, "敏感操作")
+        
         # Send UI Card
         if self.main_loop and self.main_loop.is_running():
             asyncio.run_coroutine_threadsafe(
@@ -90,11 +102,11 @@ class AgentRunner:
                     "taskId": task_id,
                     "data": {
                         "type": "confirm",
-                        "title": "Sensitive Action Permission",
+                        "title": f"敏感操作权限 - {permission_name}",
                         "content": clean_message,
                         "options": [
-                            {"label": "Deny", "value": "No", "type": "danger"},
-                            {"label": "Allow", "value": "Yes", "type": "success"}
+                            {"label": "拒绝", "value": "No", "type": "danger"},
+                            {"label": "允许", "value": "Yes", "type": "success"}
                         ]
                     }
                 }),
@@ -234,6 +246,129 @@ class AgentRunner:
         else:
             self._emit_log(task_id, "info", f"User provided input: {response}")
         return str(response)
+    
+    def _click_annotation_callback(self, task_id: str, message: str) -> dict:
+        """
+        Callback for requesting user to annotate click position on screenshot.
+        Returns a dict with 'x', 'y', and 'description' fields.
+        Blocks until user responds via API.
+        """
+        self._emit_log(task_id, "warn", f"Waiting for click annotation: {message}")
+        
+        # Get current screenshot with full resolution for coordinate conversion
+        task_data = self.active_tasks.get(task_id)
+        device_id = None
+        if task_data:
+            device_id = task_data.get("device_id")
+        
+        # Get screenshot and screen size for coordinate conversion
+        factory = get_device_factory()
+        screenshot_obj = None
+        screen_width = 1080
+        screen_height = 2400
+        
+        try:
+            if device_id:
+                # Get full resolution screenshot for annotation
+                screenshot_obj = factory.get_screenshot(device_id, quality=75, max_width=1080)
+                # Get actual screen size
+                if hasattr(factory.module, 'get_screen_size'):
+                    screen_width, screen_height = factory.module.get_screen_size(device_id)
+        except Exception as e:
+            print(f"Error getting screenshot for annotation: {e}")
+        
+        screenshot_base64 = None
+        screenshot_width = screen_width
+        screenshot_height = screen_height
+        
+        if screenshot_obj:
+            screenshot_base64 = screenshot_obj.base64_data
+            # Screenshot dimensions (may be resized)
+            screenshot_width = screenshot_obj.width
+            screenshot_height = screenshot_obj.height
+        
+        event = threading.Event()
+        self.pending_interactions[task_id] = {"event": event, "response": None, "screen_size": (screen_width, screen_height), "screenshot_size": (screenshot_width, screenshot_height)}
+        
+        # Send UI Card with screenshot for annotation
+        if self.main_loop and self.main_loop.is_running():
+            # Format screenshot as data URL if it's base64
+            screenshot_url = screenshot_base64
+            if screenshot_base64 and not screenshot_base64.startswith("data:"):
+                screenshot_url = f"data:image/jpeg;base64,{screenshot_base64}"
+            
+            asyncio.run_coroutine_threadsafe(
+                stream_manager.broadcast({
+                    "type": "interaction",
+                    "taskId": task_id,
+                    "data": {
+                        "type": "click_annotation",
+                        "content": message,
+                        "screenshot": screenshot_url,
+                        "screen_width": screen_width,
+                        "screen_height": screen_height,
+                        "screenshot_width": screenshot_width,
+                        "screenshot_height": screenshot_height
+                    }
+                }),
+                self.main_loop
+            )
+        
+        task_data = self.active_tasks.get(task_id)
+        while not event.is_set():
+            if task_data and task_data["stop_event"].is_set():
+                del self.pending_interactions[task_id]
+                return {"x": 0, "y": 0, "description": ""}
+            time.sleep(0.5)
+        
+        interaction_data = self.pending_interactions[task_id]
+        response = interaction_data["response"]
+        screen_width, screen_height = interaction_data.get("screen_size", (1080, 2400))
+        screenshot_width, screenshot_height = interaction_data.get("screenshot_size", (1080, 2400))
+        del self.pending_interactions[task_id]
+        
+        # Parse response - it should be a JSON string with type='click_annotation'
+        try:
+            import json
+            if isinstance(response, str):
+                response_data = json.loads(response)
+                if response_data.get("type") == "click_annotation":
+                    # User coordinates are relative to screenshot, convert to screen coordinates
+                    screenshot_x = response_data.get("x", 0)
+                    screenshot_y = response_data.get("y", 0)
+                    
+                    # Convert from screenshot coordinates to screen coordinates
+                    # If screenshot was resized, we need to scale back
+                    scale_x = screen_width / screenshot_width if screenshot_width > 0 else 1.0
+                    scale_y = screen_height / screenshot_height if screenshot_height > 0 else 1.0
+                    
+                    screen_x = int(screenshot_x * scale_x)
+                    screen_y = int(screenshot_y * scale_y)
+                    
+                    annotation = {
+                        "x": screen_x,
+                        "y": screen_y,
+                        "description": response_data.get("description", "")
+                    }
+                    self._emit_log(task_id, "info", f"User annotated click at screenshot ({screenshot_x}, {screenshot_y}) -> screen ({screen_x}, {screen_y}): {annotation['description']}")
+                    # Store annotation for learning
+                    self._store_click_annotation(task_id, annotation, message)
+                    return annotation
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            print(f"Error parsing click annotation response: {e}, response: {response}")
+        
+        return {"x": 0, "y": 0, "description": ""}
+    
+    def _store_click_annotation(self, task_id: str, annotation: dict, context: str):
+        """
+        Store click annotation for learning purposes.
+        This can be used to improve future decision-making.
+        """
+        # TODO: Store in database or file for learning
+        # For now, just log it
+        task = task_manager.get_task(task_id)
+        if task:
+            self._emit_log(task_id, "info", f"Stored click annotation: context='{context}', position=({annotation['x']}, {annotation['y']}), description='{annotation['description']}'")
 
     def _takeover_callback(self, task_id: str, message: str) -> None:
         """
@@ -440,7 +575,7 @@ class AgentRunner:
             print(f"Error getting all installed apps: {e}")
             # Fallback to user_apps if provided, or empty list
             return user_apps if user_apps else []
-    
+
     def _run_agent_loop(self, task: AgentTask, stop_event: threading.Event, prompt_override: str = None, installed_apps: list = None, screen_change_event: threading.Event = None):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -462,10 +597,13 @@ class AgentRunner:
             start_screenshot = self._get_screenshot_for_task(task.id)
             self._emit_log(task.id, "info", f"Starting task: {display_name}", start_screenshot)
             
+            # Normalize API key: treat "EMPTY" as empty string
+            api_key = self.api_key if self.api_key != "EMPTY" else ""
+            
             model_config = ModelConfig(
                 base_url=self.base_url,
                 model_name=self.model_name,
-                api_key=self.api_key
+                api_key=api_key
             )
             
             # Construct Agent Prompt based on Role
@@ -478,11 +616,44 @@ class AgentRunner:
             # Get app matching config from config_manager
             system_app_mappings = config_manager.get_system_app_mappings()
             llm_prompt_template = config_manager.get_llm_prompt_template()
-            system_prompt = config_manager.get_system_prompt(lang="cn")
+            # Get system prompt with device priority: device-specific > global > default
+            system_prompt = config_manager.get_system_prompt(lang="cn", device_id=device_id)
             
             # Get all installed apps including system apps for LLM
             # Frontend only sends user-installed apps, so we need to fetch all apps here
             all_apps_for_llm = self._get_all_installed_apps(device_id, installed_apps)
+            
+            # Status callback for long-running tasks (e.g., app installation)
+            def status_callback(status_type: str, status_data: dict):
+                """Callback for reporting long-running task status updates."""
+                if self.main_loop and self.main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        stream_manager.broadcast({
+                            "type": "status",
+                            "taskId": task.id,
+                            "data": {
+                                "status_type": status_type,
+                                **status_data
+                            }
+                        }),
+                        self.main_loop
+                    )
+            
+            # Status callback for long-running tasks (e.g., app installation)
+            def status_callback(status_type: str, status_data: dict):
+                """Callback for reporting long-running task status updates."""
+                if self.main_loop and self.main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        stream_manager.broadcast({
+                            "type": "status",
+                            "taskId": task.id,
+                            "data": {
+                                "status_type": status_type,
+                                **status_data
+                            }
+                        }),
+                        self.main_loop
+                    )
             
             agent = PhoneAgent(
                 model_config=model_config,
@@ -496,7 +667,9 @@ class AgentRunner:
                 ),
                 confirmation_callback=lambda msg: self._confirmation_callback(task.id, msg),
                 input_callback=lambda msg: self._input_callback(task.id, msg),
-                takeover_callback=lambda msg: self._takeover_callback(task.id, msg)
+                takeover_callback=lambda msg: self._takeover_callback(task.id, msg),
+                click_annotation_callback=lambda msg: self._click_annotation_callback(task.id, msg),
+                status_callback=status_callback
             )
             
             step_count = 0
@@ -675,7 +848,8 @@ class AgentRunner:
 
     def _handle_step_result(self, task_id: str, result: StepResult):
         # Get screenshot for this step
-        screenshot_base64 = self._get_screenshot_for_task(task_id)
+        # Use annotated screenshot if available (for Tap actions), otherwise use regular screenshot
+        screenshot_base64 = result.annotated_screenshot if result.annotated_screenshot else self._get_screenshot_for_task(task_id)
         
         if result.thinking:
             self._emit_log(task_id, "thought", result.thinking, screenshot_base64)

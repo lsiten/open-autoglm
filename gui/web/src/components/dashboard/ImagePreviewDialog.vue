@@ -53,7 +53,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const imageIndex = ref(props.initialIndex || 0)
+const imageIndex = ref(props.initialIndex ?? 0)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -62,12 +62,26 @@ const visible = computed({
 
 const currentImageUrl = computed(() => {
   if (props.images.length === 0) return ''
-  return props.images[imageIndex.value] || props.images[0]
+  const index = imageIndex.value >= 0 && imageIndex.value < props.images.length 
+    ? imageIndex.value 
+    : 0
+  return props.images[index] || ''
 })
 
+// Watch for initialIndex changes and update imageIndex
 watch(() => props.initialIndex, (newIndex) => {
   if (newIndex !== undefined && newIndex >= 0 && newIndex < props.images.length) {
     imageIndex.value = newIndex
+  }
+}, { immediate: true })
+
+// Watch for dialog visibility to reset index when opened
+watch(() => props.modelValue, (isVisible) => {
+  if (isVisible && props.initialIndex !== undefined) {
+    // When dialog opens, ensure imageIndex is set to initialIndex
+    if (props.initialIndex >= 0 && props.initialIndex < props.images.length) {
+      imageIndex.value = props.initialIndex
+    }
   }
 })
 

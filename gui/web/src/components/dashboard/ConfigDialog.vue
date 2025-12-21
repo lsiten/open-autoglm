@@ -77,18 +77,32 @@ const visible = computed({
 const config = ref({ ...props.config })
 const selectedProvider = ref(props.selectedProvider || 'vllm')
 
+// Watch for changes in local config and sync to parent
+watch(config, (newConfig) => {
+  emit('update:config', { ...newConfig })
+}, { deep: true })
+
 watch(() => props.config, (newConfig) => {
+  // Only update if the props config is actually different to avoid infinite loops
+  if (JSON.stringify(config.value) !== JSON.stringify(newConfig)) {
   config.value = { ...newConfig }
+  }
 }, { deep: true })
 
 watch(() => props.selectedProvider, (newVal) => {
-  if (newVal) {
+  if (newVal && newVal !== selectedProvider.value) {
     selectedProvider.value = newVal
+    // Don't call updateProviderConfig here to avoid resetting API key
+    // The config should already be set from props
   }
 })
 
 const updateProviderConfig = (val: string) => {
   selectedProvider.value = val
+  // Preserve existing API key if it's already set (not empty and not default)
+  const existingApiKey = config.value.apiKey
+  const shouldPreserveApiKey = existingApiKey && existingApiKey !== 'EMPTY' && existingApiKey.trim() !== ''
+  
   const providerConfigs: Record<string, any> = {
     vllm: { baseUrl: 'http://localhost:8000/v1', model: 'autoglm-phone-9b', apiKey: 'EMPTY' },
     ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama2', apiKey: '' },
@@ -99,13 +113,21 @@ const updateProviderConfig = (val: string) => {
   }
   
   if (providerConfigs[val]) {
-    Object.assign(config.value, providerConfigs[val])
+    const newConfig = { ...providerConfigs[val] }
+    // Preserve existing API key if it exists
+    if (shouldPreserveApiKey) {
+      newConfig.apiKey = existingApiKey
+    }
+    Object.assign(config.value, newConfig)
     emit('update:config', { ...config.value })
     emit('update:provider', val)
   }
 }
 
 const handleSave = () => {
+  // Ensure we emit the latest config before saving
+  emit('update:config', { ...config.value })
+  emit('update:provider', selectedProvider.value)
   emit('save')
   visible.value = false
 }

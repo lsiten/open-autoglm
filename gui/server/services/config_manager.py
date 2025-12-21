@@ -250,16 +250,48 @@ class ConfigManager:
         """Get all configuration."""
         return self._config.copy()
     
-    def get_system_prompt(self, lang: str = "cn") -> str:
+    def get_system_prompt(self, lang: str = "cn", device_id: Optional[str] = None) -> str:
         """Get system prompt for agent.
+        
+        Priority: device-specific prompt > global prompt > default prompt
         
         Args:
             lang: Language code, 'cn' for Chinese, 'en' for English.
+            device_id: Optional device ID. If provided, will check for device-specific prompt first.
         
         Returns:
             System prompt string.
         """
-        # Check if custom prompt is configured
+        # First, check for device-specific prompt if device_id is provided
+        if device_id:
+            device_prompts = self._config.get("device_system_prompts", {})
+            device_prompt = device_prompts.get(device_id, {}).get(lang)
+            if device_prompt:
+                # Replace date placeholder if present
+                from datetime import datetime
+                if lang == "cn":
+                    today = datetime.today()
+                    weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+                    weekday = weekday_names[today.weekday()]
+                    formatted_date = today.strftime("%Y年%m月%d日") + " " + weekday
+                    if "{date}" in device_prompt:
+                        return device_prompt.replace("{date}", formatted_date)
+                    if device_prompt.startswith("今天的日期是: "):
+                        lines = device_prompt.split("\n", 1)
+                        if len(lines) > 1:
+                            return f"今天的日期是: {formatted_date}\n{lines[1]}"
+                    return device_prompt.replace("{date}", formatted_date)
+                else:
+                    formatted_date = datetime.today().strftime("%Y-%m-%d, %A")
+                    if "{date}" in device_prompt:
+                        return device_prompt.replace("{date}", formatted_date)
+                    if device_prompt.startswith("The current date: "):
+                        lines = device_prompt.split("\n", 1)
+                        if len(lines) > 1:
+                            return f"The current date: {formatted_date}\n{lines[1]}"
+                    return device_prompt.replace("{date}", formatted_date)
+        
+        # Check if global custom prompt is configured
         custom_prompt = self._config.get("system_prompt", {}).get(lang)
         if custom_prompt:
             # Replace date placeholder if present
@@ -305,26 +337,64 @@ class ConfigManager:
         self._config["system_prompt"][lang] = prompt
         self._save_config()
     
-    def reset_system_prompt(self, lang: str = "cn"):
+    def reset_system_prompt(self, lang: str = "cn", device_id: Optional[str] = None):
         """Reset system prompt to default.
         
         Args:
             lang: Language code, 'cn' for Chinese, 'en' for English.
+            device_id: Optional device ID. If provided, resets device-specific prompt; otherwise resets global prompt.
         """
-        if "system_prompt" in self._config and lang in self._config["system_prompt"]:
-            del self._config["system_prompt"][lang]
-            self._save_config()
+        if device_id:
+            # Reset device-specific prompt
+            if "device_system_prompts" in self._config:
+                if device_id in self._config["device_system_prompts"]:
+                    if lang in self._config["device_system_prompts"][device_id]:
+                        del self._config["device_system_prompts"][device_id][lang]
+                        # Remove device entry if no prompts left
+                        if not self._config["device_system_prompts"][device_id]:
+                            del self._config["device_system_prompts"][device_id]
+                        self._save_config()
+        else:
+            # Reset global prompt
+            if "system_prompt" in self._config and lang in self._config["system_prompt"]:
+                del self._config["system_prompt"][lang]
+                self._save_config()
     
-    def get_system_prompt_raw(self, lang: str = "cn") -> tuple[str, bool]:
+    def update_device_system_prompt(self, device_id: str, prompt: str, lang: str = "cn"):
+        """Update device-specific system prompt.
+        
+        Args:
+            device_id: Device ID.
+            prompt: System prompt text. Can use {date} placeholder for date.
+            lang: Language code, 'cn' for Chinese, 'en' for English.
+        """
+        if "device_system_prompts" not in self._config:
+            self._config["device_system_prompts"] = {}
+        if device_id not in self._config["device_system_prompts"]:
+            self._config["device_system_prompts"][device_id] = {}
+        self._config["device_system_prompts"][device_id][lang] = prompt
+        self._save_config()
+    
+    def get_system_prompt_raw(self, lang: str = "cn", device_id: Optional[str] = None) -> tuple[str, bool]:
         """Get raw system prompt (without date replacement) for editing.
+        
+        Priority: device-specific prompt > global prompt > default prompt
         
         Args:
             lang: Language code, 'cn' for Chinese, 'en' for English.
+            device_id: Optional device ID. If provided, will check for device-specific prompt first.
         
         Returns:
             Tuple of (raw prompt string, is_custom bool).
         """
-        # Check if custom prompt is configured
+        # First, check for device-specific prompt if device_id is provided
+        if device_id:
+            device_prompts = self._config.get("device_system_prompts", {})
+            device_prompt = device_prompts.get(device_id, {}).get(lang)
+            if device_prompt:
+                return device_prompt, True
+        
+        # Check if global custom prompt is configured
         custom_prompt = self._config.get("system_prompt", {}).get(lang)
         if custom_prompt:
             return custom_prompt, True

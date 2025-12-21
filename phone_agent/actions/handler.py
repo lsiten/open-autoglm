@@ -10,6 +10,7 @@ from typing import Any, Callable
 from phone_agent.config.timing import TIMING_CONFIG
 from phone_agent.device_factory import get_device_factory
 from phone_agent.utils.app_matcher import match_app_with_llm
+from phone_agent.utils.image_annotation import annotate_click_position
 
 
 @dataclass
@@ -20,6 +21,7 @@ class ActionResult:
     should_finish: bool
     message: str | None = None
     requires_confirmation: bool = False
+    annotated_screenshot: str | None = None  # Screenshot with click position marked (for Tap actions)
 
 
 class ActionHandler:
@@ -39,6 +41,7 @@ class ActionHandler:
         confirmation_callback: Callable[[str], bool] | None = None,
         takeover_callback: Callable[[str], None] | None = None,
         input_callback: Callable[[str], str] | None = None,
+        click_annotation_callback: Callable[[str], dict] | None = None,
         model_client: Any = None,
         installed_apps: list[dict[str, Any]] | None = None,
         system_app_mappings: dict[str, list] | None = None,
@@ -48,13 +51,15 @@ class ActionHandler:
         self.confirmation_callback = confirmation_callback or self._default_confirmation
         self.takeover_callback = takeover_callback or self._default_takeover
         self.input_callback = input_callback or self._default_input
+        self.click_annotation_callback = click_annotation_callback
         self.model_client = model_client
         self.installed_apps = installed_apps
         self.system_app_mappings = system_app_mappings
         self.llm_prompt_template = llm_prompt_template
 
     def execute(
-        self, action: dict[str, Any], screen_width: int, screen_height: int, current_app: str = None
+        self, action: dict[str, Any], screen_width: int, screen_height: int, current_app: str = None,
+        screenshot_base64: str = None, screenshot_width: int = None, screenshot_height: int = None
     ) -> ActionResult:
         """
         Execute an action from the AI model.
@@ -100,6 +105,18 @@ class ActionHandler:
             # Actually, let's just update internal handlers to accept **kwargs or explicitly
             # For simplicity, we can set self.current_app temporarily
             self.current_app = current_app 
+            
+            # For Tap actions, pass screenshot info for annotation
+            if action_name == "Tap" and screenshot_base64 and screenshot_width and screenshot_height:
+                # Check if handler accepts screenshot parameters
+                import inspect
+                sig = inspect.signature(handler_method)
+                if 'screenshot_base64' in sig.parameters:
+                    return handler_method(action, screen_width, screen_height, 
+                                         screenshot_base64=screenshot_base64,
+                                         screenshot_width=screenshot_width,
+                                         screenshot_height=screenshot_height)
+            
             return handler_method(action, screen_width, screen_height)
         except Exception as e:
             return ActionResult(
@@ -123,13 +140,25 @@ class ActionHandler:
             "Note": self._handle_note,
             "Call_API": self._handle_call_api,
             "Interact": self._handle_interact,
+            "AskUserClick": self._handle_ask_user_click,
         }
         return handlers.get(action_name)
 
     def _convert_relative_to_absolute(
         self, element: list[int], screen_width: int, screen_height: int
     ) -> tuple[int, int]:
-        """Convert relative coordinates (0-1000) to absolute pixels."""
+        """
+        Convert relative coordinates (0-1000) to absolute pixels.
+        
+        Note: The AI model sees a screenshot (which may be resized) and gives coordinates
+        relative to that screenshot. The screen_width/height passed here should be the
+        actual screen dimensions, not the screenshot dimensions.
+        
+        The conversion formula:
+        - AI gives relative coord [x_rel, y_rel] where 0-999 maps to screenshot dimensions
+        - We convert to actual screen coordinates using the actual screen dimensions
+        - This works because the relative coordinate system (0-999) is proportional
+        """
         x = int(element[0] / 1000 * screen_width)
         y = int(element[1] / 1000 * screen_height)
         return x, y
@@ -212,8 +241,10 @@ class ActionHandler:
             return ActionResult(True, False)
             
         # App not found -> Potential Install
-        if not self._check_sensitive_permission("install_app", f"Install app '{app_name}'"):
-            return ActionResult(False, True, "User denied app installation")
+        # Check permission configuration BEFORE attempting installation
+        # This ensures that EVERY app installation is checked against configuration
+        if not self._check_sensitive_permission("install_app", f"安装应用: {app_name}"):
+            return ActionResult(False, True, "用户拒绝了应用安装操作")
 
         # Permission granted, instruct LLM to proceed with installation
         return ActionResult(
@@ -225,26 +256,37 @@ class ActionHandler:
     def _check_sensitive_permission(self, permission_key: str, message: str) -> bool:
         """
         Check if a sensitive action is allowed by configuration.
-        Returns True if allowed (auto-approve), False if requires manual confirmation.
+        
+        This method is called EVERY TIME a sensitive action is about to be executed.
+        It checks the device's permission configuration:
+        - If permission is enabled: automatically approves (returns True)
+        - If permission is disabled: requests user confirmation via callback (returns True/False based on user response)
+        
+        Args:
+            permission_key: The permission key (e.g., "install_app", "payment", "send_sms")
+            message: Human-readable message describing the action
+        
+        Returns:
+            True if action is allowed (auto-approved or user confirmed), False if user denied
         """
-        if self.confirmation_callback:
-            # We assume confirmation_callback signature is (message) -> bool
-            # But we want to pass permission_key too. 
-            # We can overload the message or assume callback handles it if we pass a dict?
-            # Or better, just modify the callback in AgentRunner to parse it.
-            # For backward compatibility, let's format the message.
-            # But AgentRunner needs the key to look up permissions.
-            # Let's try to pass a tuple or special string if the callback allows it?
-            # Or relies on the callback being smart.
-            
-            # Actually, the best way is to update the type hint and pass more info if possible.
-            # But to avoid breaking changes, let's prefix the message.
-            # "[PERMISSION:install_app] Message..."
-            full_msg = f"[PERMISSION:{permission_key}] {message}"
-            return self.confirmation_callback(full_msg)
-        return False
+        if not self.confirmation_callback:
+            # No callback means we can't check permissions - deny by default for safety
+            print(f"[ActionHandler] No confirmation callback available, denying sensitive action: {message}")
+            return False
+        
+        # Format message with permission key prefix for callback to parse
+        # Format: "[PERMISSION:key] message"
+        full_msg = f"[PERMISSION:{permission_key}] {message}"
+        
+        # Callback will:
+        # 1. Parse permission key from message
+        # 2. Check device permission configuration
+        # 3. If enabled: auto-approve (return True)
+        # 4. If disabled: request user confirmation (return True/False based on user response)
+        return self.confirmation_callback(full_msg)
 
-    def _handle_tap(self, action: dict, width: int, height: int) -> ActionResult:
+    def _handle_tap(self, action: dict, width: int, height: int, screenshot_base64: str = None, 
+                    screenshot_width: int = None, screenshot_height: int = None) -> ActionResult:
         """Handle tap action."""
         element = action.get("element")
         if not element:
@@ -268,47 +310,99 @@ class ActionHandler:
              if not self._check_sensitive_permission("make_call", "Make phone call"):
                  return ActionResult(False, True, "User denied phone call")
 
+        # Annotate screenshot with click position before executing tap
+        # IMPORTANT: x, y are in actual screen coordinates (after conversion from AI's relative coords)
+        # screenshot_width/height are the dimensions of the screenshot that AI saw (may be resized)
+        # width/height are the actual screen dimensions used for coordinate conversion
+        annotated_screenshot = None
+        if screenshot_base64 and screenshot_width and screenshot_height:
+            try:
+                # Debug: print coordinate info
+                if hasattr(self, 'device_id') and self.device_id:
+                    print(f"[Tap Annotation] Screen coords: ({x}, {y}), Screenshot size: {screenshot_width}x{screenshot_height}, Screen size: {width}x{height}")
+                
+                annotated_screenshot = annotate_click_position(
+                    screenshot_base64=screenshot_base64,
+                    x=x,  # Actual screen X coordinate
+                    y=y,  # Actual screen Y coordinate
+                    screenshot_width=screenshot_width,  # Screenshot width (AI saw this)
+                    screenshot_height=screenshot_height,  # Screenshot height (AI saw this)
+                    actual_screen_width=width,  # Actual screen width
+                    actual_screen_height=height  # Actual screen height
+                )
+            except Exception as e:
+                print(f"Error annotating click position: {e}")
+                import traceback
+                traceback.print_exc()
+
         device_factory = get_device_factory()
         device_factory.tap(x, y, self.device_id)
         time.sleep(TIMING_CONFIG.device.default_tap_delay)
-        return ActionResult(True, False)
+        return ActionResult(True, False, annotated_screenshot=annotated_screenshot)
 
     def _handle_type(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle text input action."""
         text = action.get("text", "")
+        
+        print(f"[Type Action] Attempting to type text: '{text}'", flush=True)
 
-        # Sensitive Action Check
+        # Sensitive Action Check - Check permissions BEFORE typing text
+        # This ensures that EVERY sensitive text input is checked against configuration
         current = getattr(self, 'current_app', '') or ''
         current = current.lower()
         
-        # WeChat Reply
+        # WeChat Reply Check - Check if we're in WeChat
         if 'tencent.mm' in current or 'wechat' in current:
-             if not self._check_sensitive_permission("wechat_reply", f"Reply to WeChat: {text}"):
-                 return ActionResult(False, True, "User denied WeChat reply")
+            # Check permission configuration - will auto-approve if enabled, or request user confirmation if disabled
+            if not self._check_sensitive_permission("wechat_reply", f"回复微信消息: {text[:50]}..."):
+                print(f"[Type Action] Permission denied for WeChat reply", flush=True)
+                return ActionResult(False, True, "用户拒绝了微信回复操作")
 
-        # Send SMS
+        # Send SMS Check - Check if we're in SMS/messaging app
         if any(app in current for app in ['mms', 'messaging', 'sms']):
-             if not self._check_sensitive_permission("send_sms", f"Send SMS: {text}"):
-                 return ActionResult(False, True, "User denied sending SMS")
+            # Check permission configuration - will auto-approve if enabled, or request user confirmation if disabled
+            if not self._check_sensitive_permission("send_sms", f"发送短信: {text[:50]}..."):
+                print(f"[Type Action] Permission denied for SMS", flush=True)
+                return ActionResult(False, True, "用户拒绝了发送短信操作")
 
         device_factory = get_device_factory()
 
+        # Check if input field is focused (by checking if keyboard is visible)
+        # This is a heuristic - we can't directly check focus, but we can check if keyboard is shown
+        print(f"[Type Action Debug] Checking input field focus state...", flush=True)
+        try:
+            from phone_agent.adb.device import get_current_app
+            current_app_info = get_current_app(self.device_id, installed_apps=None)
+            print(f"[Type Action Debug] Current app: {current_app_info}", flush=True)
+        except Exception as e:
+            print(f"[Type Action Debug] Could not get current app: {e}", flush=True)
+
         # Switch to ADB keyboard
+        print(f"[Type Action] Switching to ADB keyboard...", flush=True)
         original_ime = device_factory.detect_and_set_adb_keyboard(self.device_id)
+        print(f"[Type Action] Original IME: {original_ime}, ADB keyboard activated", flush=True)
         time.sleep(TIMING_CONFIG.action.keyboard_switch_delay)
 
         # Clear existing text and type new text
+        print(f"[Type Action] Clearing existing text...", flush=True)
         device_factory.clear_text(self.device_id)
         time.sleep(TIMING_CONFIG.action.text_clear_delay)
 
         # Handle multiline text by splitting on newlines
+        print(f"[Type Action] Typing text: '{text}'...", flush=True)
+        print(f"[Type Action Debug] Text details: length={len(text)}, contains_newline={chr(10) in text or chr(13) in text}", flush=True)
         device_factory.type_text(text, self.device_id)
         time.sleep(TIMING_CONFIG.action.text_input_delay)
+        print(f"[Type Action] Text input completed", flush=True)
 
         # Restore original keyboard
+        print(f"[Type Action] Restoring original keyboard: {original_ime}", flush=True)
         device_factory.restore_keyboard(original_ime, self.device_id)
         time.sleep(TIMING_CONFIG.action.keyboard_restore_delay)
 
+        print(f"[Type Action] Type action completed successfully", flush=True)
+        print(f"[Type Action Debug] Note: Success here means command executed, not that text was actually entered.", flush=True)
+        print(f"[Type Action Debug] The system will verify by comparing screenshots before/after.", flush=True)
         return ActionResult(True, False)
 
     def _handle_swipe(self, action: dict, width: int, height: int) -> ActionResult:
@@ -406,6 +500,34 @@ class ActionHandler:
         
         user_response = self.input_callback(message)
         return ActionResult(True, False, message=f"User input: {user_response}")
+    
+    def _handle_ask_user_click(self, action: dict, width: int, height: int) -> ActionResult:
+        """Handle request for user to annotate click position on screenshot."""
+        if not self.click_annotation_callback:
+            return ActionResult(False, False, "Click annotation callback not available")
+        
+        message = action.get("message", "Please click on the screen to indicate where to tap.")
+        
+        # Request user annotation
+        annotation = self.click_annotation_callback(message)
+        
+        if annotation and annotation.get("x") and annotation.get("y"):
+            # Execute the tap at annotated position
+            x = annotation["x"]
+            y = annotation["y"]
+            description = annotation.get("description", "")
+            
+            device_factory = get_device_factory()
+            device_factory.tap(x, y, self.device_id)
+            time.sleep(TIMING_CONFIG.device.default_tap_delay)
+            
+            result_message = f"Tapped at user-annotated position ({x}, {y})"
+            if description:
+                result_message += f": {description}"
+            
+            return ActionResult(True, False, message=result_message)
+        else:
+            return ActionResult(False, False, "User did not provide click annotation")
 
     def _send_keyevent(self, keycode: str) -> None:
         """Send a keyevent to the device."""
@@ -507,13 +629,7 @@ def parse_action(response: str) -> dict[str, Any]:
         if "</answer>" in response:
             response = response.split("</answer>")[0].strip()
             
-        if response.startswith('do(action="Type"') or response.startswith(
-            'do(action="Type_Name"'
-        ):
-            text = response.split("text=", 1)[1][1:-2]
-            action = {"_metadata": "do", "action": "Type", "text": text}
-            return action
-        elif response.startswith("do"):
+        if response.startswith("do"):
             # Use AST parsing instead of eval for safety
             try:
                 # Escape special characters (newlines, tabs, etc.) for valid Python syntax
@@ -541,6 +657,12 @@ def parse_action(response: str) -> dict[str, Any]:
             action = {
                 "_metadata": "finish",
                 "message": response.replace("finish(message=", "")[1:-2],
+            }
+        elif not response or response.strip() == "":
+            # Empty response - treat as finish with empty message
+            action = {
+                "_metadata": "finish",
+                "message": "模型返回了空响应，任务已结束",
             }
         else:
             raise ValueError(f"Failed to parse action: {response}")

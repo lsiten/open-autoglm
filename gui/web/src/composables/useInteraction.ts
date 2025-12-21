@@ -46,9 +46,35 @@ export function useInteraction(apiBaseUrl: string, activeTaskId: Ref<string | nu
     }
   }
 
+  const handleCardAnnotation = async (data: { msg: any, annotation: { x: number, y: number, description: string } }) => {
+    const { msg, annotation } = data
+    msg.submitted = true
+    msg.annotation = annotation
+    if (msg.id) {
+      await db.updateMessage(msg.id, { submitted: true, annotation })
+    }
+    
+    if (activeTaskId.value) {
+      try {
+        await api.post(`/tasks/${activeTaskId.value}/interaction`, {
+          response: JSON.stringify({
+            type: 'click_annotation',
+            x: annotation.x,
+            y: annotation.y,
+            description: annotation.description
+          })
+        })
+      } catch (e) {
+        console.error('Failed to send annotation response', e)
+        ElMessage.error(t('error.failed_send_interaction'))
+      }
+    }
+  }
+
   return {
     handleCardAction,
-    handleCardInput
+    handleCardInput,
+    handleCardAnnotation
   }
 }
 

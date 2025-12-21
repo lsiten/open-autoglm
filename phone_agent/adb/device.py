@@ -3,7 +3,7 @@
 import os
 import subprocess
 import time
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 
 from phone_agent.config.apps import APP_PACKAGES
 from phone_agent.config.timing import TIMING_CONFIG
@@ -64,12 +64,41 @@ def get_screen_size(device_id: str | None = None) -> Tuple[int, int]:
         pass
     return 1080, 2400 # Default fallback
 
-def get_current_app(device_id: str | None = None) -> str:
+def _extract_package_from_line(line: str) -> str | None:
+    """
+    Extract package name from dumpsys window output line.
+    
+    Args:
+        line: A line from dumpsys window output.
+    
+    Returns:
+        Package name if found, None otherwise.
+    """
+    # Common format: package/activity or package
+    # Look for patterns like "com.example.app/.MainActivity" or "com.example.app"
+    import re
+    
+    # Pattern 1: package/activity format
+    match = re.search(r'([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*[a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)/', line)
+    if match:
+        return match.group(1)
+    
+    # Pattern 2: standalone package (less common in dumpsys output)
+    match = re.search(r'\b([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*[a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)\b', line)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
+def get_current_app(device_id: str | None = None, installed_apps: list = None) -> str:
     """
     Get the currently focused app name.
 
     Args:
         device_id: Optional ADB device ID for multi-device setups.
+        installed_apps: Optional list of installed apps with 'name' and 'package' fields.
+                       If provided, will match package names to get app names.
 
     Returns:
         The app name if recognized, otherwise "System Home".
@@ -104,15 +133,41 @@ def get_current_app(device_id: str | None = None) -> str:
         "com.htc.launcher",  # HTC
     ]
 
+    # Create package to name mapping from installed_apps if provided
+    pkg_to_name = {}
+    if installed_apps:
+        for app in installed_apps:
+            pkg = app.get("package", "")
+            name = app.get("name", "")
+            if pkg and name:
+                pkg_to_name[pkg] = name
+
     # Parse window focus info
     for line in output.split("\n"):
         if "mCurrentFocus" in line or "mFocusedApp" in line or "mTopApp" in line:
-            # First check if it's a known app
+            # Extract package name from line
+            current_package = _extract_package_from_line(line)
+            
+            if current_package:
+                # Check if it's a launcher first
+                if current_package in LAUNCHER_PACKAGES:
+                    return "System Home"
+                
+                # Check if it's in installed_apps mapping
+                if current_package in pkg_to_name:
+                    return pkg_to_name[current_package]
+                
+                # Check if it's a known app in APP_PACKAGES
+                for app_name, package in APP_PACKAGES.items():
+                    if package == current_package:
+                        return app_name
+            
+            # Fallback: check if it's a known app (old logic for backward compatibility)
             for app_name, package in APP_PACKAGES.items():
                 if package in line:
                     return app_name
             
-            # Then check if it's a launcher (system desktop)
+            # Check if it's a launcher (old logic)
             for launcher_pkg in LAUNCHER_PACKAGES:
                 if launcher_pkg in line:
                     return "System Home"
@@ -128,6 +183,10 @@ def get_current_app(device_id: str | None = None) -> str:
     # Additional check: look for launcher in mTopApp or mResumedActivity
     for line in output.split("\n"):
         if "mTopApp" in line or "mResumedActivity" in line:
+            current_package = _extract_package_from_line(line)
+            if current_package and current_package in LAUNCHER_PACKAGES:
+                return "System Home"
+            
             for launcher_pkg in LAUNCHER_PACKAGES:
                 if launcher_pkg in line:
                     return "System Home"
@@ -355,6 +414,173 @@ def get_installed_packages(device_id: str | None = None, include_system: bool = 
         return packages
     except Exception:
         return []
+
+
+def is_package_installed(package_name: str, device_id: str | None = None) -> bool:
+    """
+    Check if a package is installed on the device.
+    
+    Args:
+        package_name: Package name to check (e.g., 'com.example.app').
+        device_id: Optional ADB device ID.
+    
+    Returns:
+        True if package is installed, False otherwise.
+    """
+    adb_prefix = _get_adb_prefix(device_id)
+    try:
+        result = subprocess.run(
+            adb_prefix + ["shell", "pm", "list", "packages", package_name],
+            capture_output=True, text=True, timeout=5
+        )
+        return package_name in result.stdout
+    except Exception:
+        return False
+
+
+def get_package_install_status(package_name: str, device_id: str | None = None) -> dict:
+    """
+    Get detailed installation status of a package.
+    
+    Args:
+        package_name: Package name to check.
+        device_id: Optional ADB device ID.
+    
+    Returns:
+        Dictionary with:
+        - 'installed': bool - Whether package is installed
+        - 'installing': bool - Whether package is currently being installed
+        - 'progress': float - Installation progress (0.0-1.0), None if not installing
+        - 'status': str - Status message
+    """
+    adb_prefix = _get_adb_prefix(device_id)
+    
+    # Check if package is installed
+    installed = is_package_installed(package_name, device_id)
+    
+    if installed:
+        return {
+            "installed": True,
+            "installing": False,
+            "progress": 1.0,
+            "status": "已安装"
+        }
+    
+    # Check if package is being installed by checking package manager state
+    try:
+        # Use dumpsys to check installation state
+        result = subprocess.run(
+            adb_prefix + ["shell", "dumpsys", "package", package_name],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        output = result.stdout
+        
+        # Check for installation in progress indicators
+        # Android package manager may show installation state in dumpsys output
+        if "INSTALL_FAILED" in output or "INSTALL_SUCCEEDED" in output:
+            # Installation completed (either success or failure)
+            if "INSTALL_SUCCEEDED" in output:
+                return {
+                    "installed": True,
+                    "installing": False,
+                    "progress": 1.0,
+                    "status": "安装成功"
+                }
+            else:
+                return {
+                    "installed": False,
+                    "installing": False,
+                    "progress": None,
+                    "status": "安装失败"
+                }
+        
+        # Check if there's an active installation session
+        # We can check for installation sessions using pm list packages -u (uninstalled)
+        # or check for installation progress in logcat or dumpsys
+        # For now, we'll use a simpler heuristic: check if package appears in pending installs
+        
+        # Alternative: Check installation progress via package manager sessions
+        session_result = subprocess.run(
+            adb_prefix + ["shell", "pm", "list", "packages", "-u"],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        # If package is in uninstalled list but we're checking, it might be installing
+        # This is a heuristic - actual installation progress requires more complex parsing
+        
+        return {
+            "installed": False,
+            "installing": False,  # Can't reliably detect without more complex parsing
+            "progress": None,
+            "status": "未安装"
+        }
+        
+    except Exception as e:
+        print(f"[Device] Error checking package status: {e}")
+        return {
+            "installed": False,
+            "installing": False,
+            "progress": None,
+            "status": f"检查失败: {e}"
+        }
+
+
+def wait_for_package_installation(
+    package_name: str, 
+    device_id: str | None = None,
+    timeout: float = 300.0,
+    check_interval: float = 2.0,
+    progress_callback: Callable[[dict], None] | None = None
+) -> bool:
+    """
+    Wait for a package to be installed, monitoring installation progress.
+    
+    Args:
+        package_name: Package name to wait for.
+        device_id: Optional ADB device ID.
+        timeout: Maximum time to wait in seconds (default 5 minutes).
+        check_interval: Interval between checks in seconds (default 2 seconds).
+        progress_callback: Optional callback function(status_dict) called on each check.
+    
+    Returns:
+        True if package was installed successfully, False if timeout or installation failed.
+    """
+    start_time = time.time()
+    last_status = None
+    
+    print(f"[Device] Waiting for package '{package_name}' to be installed (timeout: {timeout}s)...")
+    
+    while time.time() - start_time < timeout:
+        status = get_package_install_status(package_name, device_id)
+        
+        # Call progress callback if provided
+        if progress_callback:
+            try:
+                progress_callback(status)
+            except Exception as e:
+                print(f"[Device] Error in progress callback: {e}")
+        
+        # Check if installation completed
+        if status["installed"]:
+            print(f"[Device] Package '{package_name}' installed successfully!")
+            return True
+        
+        # Check if installation failed
+        if "失败" in status["status"] or "失败" in status.get("status", ""):
+            print(f"[Device] Package '{package_name}' installation failed: {status['status']}")
+            return False
+        
+        # Log status change
+        if last_status != status["status"]:
+            print(f"[Device] Installation status: {status['status']}")
+            last_status = status["status"]
+        
+        time.sleep(check_interval)
+    
+    # Timeout
+    print(f"[Device] Timeout waiting for package '{package_name}' to be installed")
+    return False
 
 
 def launch_app(
