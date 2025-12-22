@@ -129,7 +129,16 @@ def _read_png_from_stream(stream, timeout=0.5) -> Optional[Image.Image]:
         # Read first 8 bytes to check signature
         header = stream.read(8)
         if not header or len(header) < 8:
+            if not hasattr(_read_png_from_stream, '_logged_empty_read'):
+                print(f"[Scrcpy] _read_png_from_stream: Empty or incomplete read (got {len(header) if header else 0} bytes)", flush=True)
+                _read_png_from_stream._logged_empty_read = True
             return None
+        
+        # Log first read for debugging (only once)
+        if not hasattr(_read_png_from_stream, '_logged_first_read'):
+            print(f"[Scrcpy] _read_png_from_stream: First 8 bytes (hex): {header.hex()}", flush=True)
+            print(f"[Scrcpy] _read_png_from_stream: First 8 bytes (ascii): {header!r}", flush=True)
+            _read_png_from_stream._logged_first_read = True
         
         # Check if we have PNG signature
         if header != signature:
@@ -266,13 +275,66 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
             return
         
         print(f"[Scrcpy] Frame reader: Started, waiting for frames from ffmpeg...", flush=True)
+        
+        # Check ffmpeg process status
+        if conn.ffmpeg_process:
+            return_code = conn.ffmpeg_process.poll()
+            if return_code is not None:
+                print(f"[Scrcpy] Frame reader: WARNING - ffmpeg process already exited with code {return_code}", flush=True)
+                # Try to read stderr to see what happened
+                if conn.ffmpeg_process.stderr:
+                    try:
+                        stderr_data = conn.ffmpeg_process.stderr.read()
+                        if stderr_data:
+                            print(f"[Scrcpy] Frame reader: ffmpeg stderr: {stderr_data.decode('utf-8', errors='ignore')}", flush=True)
+                    except:
+                        pass
+        
         frame_count = 0
         error_count = 0
         last_error_time = 0
         no_data_count = 0
         
+        # Check if stdout is readable and wait a bit for ffmpeg to start outputting
+        print(f"[Scrcpy] Frame reader: Waiting 3 seconds for ffmpeg to start outputting...", flush=True)
+        time.sleep(3)  # Give ffmpeg more time to start outputting data
+        
+        # Check process status again
+        if conn.ffmpeg_process:
+            return_code = conn.ffmpeg_process.poll()
+            if return_code is not None:
+                print(f"[Scrcpy] Frame reader: ERROR - ffmpeg process exited with code {return_code}", flush=True)
+                return
+        
+        if sys.platform != 'win32':
+            try:
+                fd = conn.ffmpeg_process.stdout.fileno()
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if ready:
+                    print(f"[Scrcpy] Frame reader: stdout is readable (fd={fd})", flush=True)
+                else:
+                    print(f"[Scrcpy] Frame reader: stdout not ready yet (fd={fd}), will keep trying...", flush=True)
+            except Exception as e:
+                print(f"[Scrcpy] Frame reader: Error checking stdout: {e}", flush=True)
+        
         while conn.running:
             try:
+                # Check if data is available before attempting to read
+                if sys.platform != 'win32':
+                    try:
+                        fd = conn.ffmpeg_process.stdout.fileno()
+                        ready, _, _ = select.select([fd], [], [], 0.5)
+                        if not ready:
+                            no_data_count += 1
+                            if no_data_count % 20 == 0:  # Log every 20 attempts (~10s)
+                                print(f"[Scrcpy] Frame reader: Still no frame after {no_data_count} attempts (~{no_data_count * 0.5:.1f}s)", flush=True)
+                            time.sleep(0.1)
+                            continue
+                    except (ValueError, OSError) as e:
+                        print(f"[Scrcpy] Frame reader: Error in select: {e}", flush=True)
+                        time.sleep(0.1)
+                        continue
+                
                 # Read PNG frame from ffmpeg output
                 img = _read_png_from_stream(conn.ffmpeg_process.stdout, timeout=0.5)
                 if img:
@@ -292,7 +354,7 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
                     
                     # Log first few frames for debugging
                     if frame_count <= 3:
-                        print(f"[Scrcpy] Frame reader: Successfully read frame {frame_count}", flush=True)
+                        print(f"[Scrcpy] Frame reader: Successfully read frame {frame_count} (size: {img.size})", flush=True)
                     no_data_count = 0  # Reset no data counter on success
                 else:
                     # No frame available
@@ -516,10 +578,12 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 "-f", "matroska",  # Input format is MKV (from scrcpy --record-format=mkv)
                 "-i", fifo_path,  # Read from named pipe (FIFO)
                 # Don't use fps filter - it causes "No filtered frames" issue
-                # Let ffmpeg output frames at the input rate, we'll control it via reading
+                # Instead, use -frames:v to limit output (but we'll read continuously)
+                # Actually, let's try without any filter and see if we can read frames
                 "-f", "image2pipe",  # Output as image stream
                 "-vcodec", "png",  # PNG format
                 "-pix_fmt", "rgb24",  # Use RGB24 pixel format for better compatibility
+                "-vsync", "0",  # Don't sync video, output frames as they come
                 "-"  # Output to stdout
             ]
             
@@ -565,9 +629,11 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                                     if first_output:
                                         print(f"[Scrcpy] ffmpeg: First output received", flush=True)
                                         first_output = False
-                                    # Log important messages immediately
-                                    if any(keyword in decoded.lower() for keyword in ['error', 'failed', 'cannot', 'invalid', 'stream', 'input']):
-                                        print(f"[Scrcpy] ffmpeg: {decoded}", flush=True)
+                                    # Log ALL ffmpeg stderr output for debugging (since we're using warning level)
+                                    print(f"[Scrcpy] ffmpeg stderr: {decoded}", flush=True)
+                                    # Log important messages with emphasis
+                                    if any(keyword in decoded.lower() for keyword in ['error', 'failed', 'cannot', 'invalid']):
+                                        print(f"[Scrcpy] ffmpeg ERROR: {decoded}", flush=True)
                                     last_output_time = time.time()
                             else:
                                 # No output for a while, check if ffmpeg is stuck
