@@ -6,6 +6,7 @@ import hashlib
 from typing import Optional, Tuple, List, Callable
 from .device_manager import device_manager
 from .stream_manager import stream_manager
+import asyncio
 from phone_agent.device_factory import get_device_factory
 
 class ScreenStreamer:
@@ -133,9 +134,30 @@ class ScreenStreamer:
                     self.latest_frame_ts = time.time()
                     frame_changed = True
                 
-                # Notify listeners outside of lock
+                # Notify listeners and broadcast via WebSocket outside of lock
                 if frame_changed:
                     self._notify_screen_change()
+                
+                # Always broadcast via WebSocket if there are connections (even if unchanged)
+                # This ensures continuous streaming similar to HTTP polling behavior
+                if stream_manager.frame_connections and self.latest_frame:
+                    try:
+                        # Use asyncio.run_coroutine_threadsafe to call async function from sync thread
+                        loop = stream_manager.main_loop
+                        if loop and loop.is_running():
+                            # Schedule the coroutine to run in the event loop
+                            future = asyncio.run_coroutine_threadsafe(
+                                stream_manager.broadcast_frame(
+                                    self.latest_frame, 
+                                    self.latest_frame_ts
+                                ),
+                                loop
+                            )
+                            # Don't wait for result to avoid blocking frame capture
+                            # Errors will be handled in broadcast_frame
+                    except Exception as e:
+                        # Don't let WebSocket errors break frame capture
+                        pass
                 
                 capture_duration = time.time() - capture_start
                 self._record_capture_time(capture_duration)
@@ -257,6 +279,21 @@ class ScreenStreamer:
                 elif status == 'unchanged':
                     # Frame unchanged is normal, not an error
                     consecutive_errors = 0
+                    # Still broadcast cached frame via WebSocket to maintain continuous stream
+                    # This matches HTTP polling behavior where we always get the latest frame
+                    if stream_manager.frame_connections and self.latest_frame:
+                        try:
+                            loop = stream_manager.main_loop
+                            if loop and loop.is_running():
+                                asyncio.run_coroutine_threadsafe(
+                                    stream_manager.broadcast_frame(
+                                        self.latest_frame, 
+                                        self.latest_frame_ts
+                                    ),
+                                    loop
+                                )
+                        except Exception:
+                            pass
                     # Still wait for target interval to maintain consistent FPS
                     remaining_time = target_frame_interval - capture_duration
                     if remaining_time > 0:

@@ -17,7 +17,9 @@ export function useConnectionWizard(
   const enablingWifi = ref(false)
   const connectingWifi = ref(false)
   const wifiIp = ref('')
+  const wifiConnected = ref(false)
   const webrtcUrl = ref('')
+  const webrtcConnected = ref(false)
 
   const checkUsbConnection = async () => {
     checkingUsb.value = true
@@ -53,20 +55,69 @@ export function useConnectionWizard(
   }
 
   const connectWifi = async () => {
+    if (!wifiIp.value || !wifiIp.value.trim()) {
+      ElMessage.error('请输入设备的IP地址')
+      return
+    }
+
+    // Validate IP address format (basic check)
+    const ipPattern = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/
+    if (!ipPattern.test(wifiIp.value.trim())) {
+      ElMessage.error('IP地址格式不正确，请输入类似 192.168.1.5 或 192.168.1.5:5555 的格式')
+      return
+    }
+
     connectingWifi.value = true
+    wifiConnected.value = false
     try {
-      await api.post('/devices/connect', { address: wifiIp.value, type: 'adb' })
-      ElMessage.success(t('success.connected_wifi'))
-      wizardStep.value = 3
-      fetchDevices()
+      await api.post('/devices/connect', { address: wifiIp.value.trim(), type: 'adb' })
+      
+      // Wait a bit and verify the device is actually connected
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      await fetchDevices()
+      
+      // Check if the device appears in the list
+      const connectedDevice = devices.value.find((d: any) => {
+        const deviceAddress = d.id.includes(':') ? d.id : `${d.id}:5555`
+        const inputAddress = wifiIp.value.trim()
+        const inputAddressWithPort = inputAddress.includes(':') ? inputAddress : `${inputAddress}:5555`
+        return deviceAddress === inputAddressWithPort || d.id === inputAddress
+      })
+      
+      if (connectedDevice && connectedDevice.status !== 'offline') {
+        ElMessage.success(t('success.connected_wifi'))
+        wifiConnected.value = true
+      } else {
+        ElMessage.warning('设备已连接，但可能尚未就绪，请稍候再试')
+        wifiConnected.value = false
+      }
     } catch (err: any) {
-      ElMessage.error(err.response?.data?.detail || t('error.connection_failed'))
+      // Extract detailed error message from backend
+      let errorMsg = t('error.connection_failed')
+      if (err.response?.data?.detail) {
+        errorMsg = err.response.data.detail
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = err.message
+      }
+      
+      // Provide helpful suggestions based on common errors
+      if (errorMsg.includes('timeout') || errorMsg.includes('Connection timeout')) {
+        errorMsg = `连接超时: ${errorMsg}。请检查：\n1. 设备IP地址是否正确\n2. 设备是否已开启无线调试\n3. 设备和电脑是否在同一WiFi网络`
+      } else if (errorMsg.includes('refused') || errorMsg.includes('unreachable')) {
+        errorMsg = `无法连接到设备: ${errorMsg}。请检查：\n1. IP地址是否正确\n2. 设备是否已开启无线调试（adb tcpip 5555）\n3. 防火墙是否阻止了连接`
+      }
+      
+      ElMessage.error(errorMsg)
+      wifiConnected.value = false
     } finally {
       connectingWifi.value = false
     }
   }
 
   const connectWebRTC = async () => {
+    webrtcConnected.value = false
     try {
       const res = await api.post('/devices/webrtc/init')
       webrtcUrl.value = res.data.url
@@ -80,15 +131,17 @@ export function useConnectionWizard(
           devices.value = res.data
           const found = devices.value.find((d: any) => d.type === 'webrtc' && d.status !== 'offline')
           if (found) {
+            webrtcConnected.value = true
             ElMessage.success(t('success.webrtc_connected'))
-            wizardStep.value = 3
             clearInterval(poll)
+            // Don't auto-advance, let user click "Next" button
           }
         } catch (e) { }
       }, 2000)
     } catch (err: any) {
       console.error(err)
       ElMessage.error(t('error.failed_init_webrtc'))
+      webrtcConnected.value = false
     }
   }
 
@@ -112,7 +165,9 @@ export function useConnectionWizard(
       wizardType.value = ''
       usbStatus.value = ''
       wifiIp.value = ''
+      wifiConnected.value = false
       webrtcUrl.value = ''
+      webrtcConnected.value = false
     }
   }
 
@@ -121,7 +176,9 @@ export function useConnectionWizard(
     wizardType.value = ''
     usbStatus.value = ''
     wifiIp.value = ''
+    wifiConnected.value = false
     webrtcUrl.value = ''
+    webrtcConnected.value = false
   }
 
   return {
@@ -132,7 +189,9 @@ export function useConnectionWizard(
     enablingWifi,
     connectingWifi,
     wifiIp,
+    wifiConnected,
     webrtcUrl,
+    webrtcConnected,
     checkUsbConnection,
     enableWifiMode,
     connectWifi,

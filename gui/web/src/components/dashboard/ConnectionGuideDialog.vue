@@ -143,7 +143,7 @@
           <el-button v-if="wizardStep === 3" @click="handleClose" type="primary" class="!bg-blue-600 !border-none">
             {{ t('common.got_it') }}
           </el-button>
-          <el-button @click="handleClose" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">
+          <el-button v-if="wizardStep !== 3" @click="handleClose" class="!bg-transparent !border-gray-600 !text-gray-300 hover:!text-white">
             {{ t('common.cancel') }}
           </el-button>
         </div>
@@ -179,6 +179,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
+  'update:wizardType': [value: 'usb' | 'wifi' | 'webrtc' | '']
   'next-step': []
   'prev-step': []
   'check-usb': []
@@ -190,6 +191,11 @@ const { t } = useI18n()
 const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
+})
+
+const wizardType = computed({
+  get: () => props.wizardType,
+  set: (val) => emit('update:wizardType', val)
 })
 
 const wifiIp = ref(props.wifiIp)

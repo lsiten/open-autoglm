@@ -2,12 +2,13 @@ import hashlib
 import gzip
 import asyncio
 import time
-from fastapi import APIRouter, HTTPException, Response, Request
+from fastapi import APIRouter, HTTPException, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, AsyncGenerator
 from ..services.device_manager import device_manager
 from ..services.screen_streamer import screen_streamer
+from ..services.stream_manager import stream_manager
 from ..services.recording_manager import recording_manager
 from phone_agent.device_factory import get_device_factory, set_device_type, DeviceType
 
@@ -323,3 +324,37 @@ async def get_mjpeg_stream():
             "Connection": "keep-alive"
         }
     )
+
+@router.websocket("/stream/ws")
+async def stream_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for frame streaming.
+    Reduces log noise by using long-lived connection instead of HTTP polling.
+    """
+    await stream_manager.connect_frame_stream(websocket)
+    
+    # Ensure streaming is started
+    if not screen_streamer.is_streaming:
+        screen_streamer.start_streaming()
+    
+    try:
+        # Keep connection alive and handle any incoming messages
+        while True:
+            try:
+                # Wait for any message from client (ping/pong or close)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # Client can send ping messages to keep connection alive
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                # Send ping to keep connection alive
+                try:
+                    await websocket.send_text("ping")
+                except Exception:
+                    break
+            except WebSocketDisconnect:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        stream_manager.disconnect_frame_stream(websocket)

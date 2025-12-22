@@ -359,14 +359,20 @@ class DeviceManager:
         # Set environment variables for the agent process if needed
         # os.environ["PHONE_AGENT_DEVICE_ID"] = device_id
         
-    def connect_remote(self, address: str, device_type: str = "adb") -> bool:
+    def connect_remote(self, address: str, device_type: str = "adb") -> tuple[bool, str]:
+        """
+        Connect to a remote device.
+        
+        Returns:
+            Tuple of (success, error_message)
+        """
         if device_type == "adb":
-            success, _ = self.adb_connection.connect(address)
-            return success
+            success, message = self.adb_connection.connect(address)
+            return success, message
         elif device_type == "hdc":
-            success, _ = self.hdc_connection.connect(address)
-            return success
-        return False
+            success, message = self.hdc_connection.connect(address)
+            return success, message
+        return False, f"Unsupported device type: {device_type}"
         
     def enable_tcpip(self, device_id: Optional[str] = None) -> bool:
         success, _ = self.adb_connection.enable_tcpip(device_id=device_id)

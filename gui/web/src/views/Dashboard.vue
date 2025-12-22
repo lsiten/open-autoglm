@@ -278,15 +278,15 @@
     <ConnectionGuideDialog
       v-model="showConnectionGuide"
       :wizard-step="wizardStep"
-      :wizard-type="wizardType"
+      v-model:wizard-type="wizardType"
       :checking-usb="checkingUsb"
       :usb-status="usbStatus"
       :enabling-wifi="enablingWifi"
       :connecting-wifi="connectingWifi"
       :wifi-ip="wifiIp"
-      :wifi-connected="false"
+      :wifi-connected="wifiConnected"
       :webrtc-url="webrtcUrl"
-      :webrtc-connected="false"
+      :webrtc-connected="webrtcConnected"
       @next-step="handleWizardNext"
       @prev-step="handleWizardPrev"
       @check-usb="checkUsbConnection"
@@ -666,7 +666,9 @@ const {
   enablingWifi,
   connectingWifi,
   wifiIp,
+  wifiConnected,
   webrtcUrl,
+  webrtcConnected,
   checkUsbConnection,
   enableWifiMode,
   connectWifi,

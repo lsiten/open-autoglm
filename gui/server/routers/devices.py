@@ -94,11 +94,14 @@ async def get_device(device_id: str):
 async def connect_device(req: ConnectRequest):
     if req.type == "webrtc":
         success = device_manager.add_webrtc_device(req.address)
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to add WebRTC device")
     else:
-        success = device_manager.connect_remote(req.address, req.type)
-        
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to connect to device")
+        success, error_message = device_manager.connect_remote(req.address, req.type)
+        if not success:
+            # Return detailed error message from ADB/HDC connection
+            detail = error_message if error_message else "Failed to connect to device"
+            raise HTTPException(status_code=400, detail=detail)
     return {"status": "connected", "address": req.address}
 
 @router.post("/wifi/enable")
