@@ -156,7 +156,21 @@ async def update_stream_settings(req: StreamSettingsRequest):
 
 @router.get("/stream/latest")
 async def get_latest_frame(request: Request):
+    # Ensure background streaming is started for better performance
+    # If not streaming and device is available, start streaming and wait for first frame
+    if not screen_streamer.is_streaming:
+        device_id = device_manager.active_device_id
+        if device_id:
+            screen_streamer.start_streaming()
+            # Wait for first frame capture (max 1 second, check every 100ms)
+            for _ in range(10):
+                await asyncio.sleep(0.1)
+                with screen_streamer._frame_lock:
+                    if screen_streamer.latest_frame and screen_streamer.latest_frame_ts > 0:
+                        break
+    
     # Asynchronously capture frame on demand (in thread pool)
+    # If streaming is active, this will return cached frame immediately
     frame, status = await screen_streamer.capture_frame()
     
     if frame:
@@ -193,8 +207,37 @@ async def get_latest_frame(request: Request):
             headers=headers
         )
     elif status == 'unchanged':
-        # Return 204 No Content to indicate success but no new data
-        # Frontend should handle this by waiting and retrying
+        # Even if content unchanged, return the frame with updated timestamp
+        # This ensures real-time frame delivery - every captured frame is available
+        # Frontend can use timestamp to determine if it's a new frame
+        if screen_streamer.latest_frame:
+            frame_hash = hashlib.md5(screen_streamer.latest_frame).hexdigest()
+            client_etag = request.headers.get("if-none-match")
+            
+            if client_etag and client_etag == frame_hash:
+                return Response(status_code=304)
+            
+            accept_encoding = request.headers.get("accept-encoding", "").lower()
+            use_gzip = "gzip" in accept_encoding
+            
+            content = screen_streamer.latest_frame
+            headers = {
+                "Cache-Control": "no-cache",
+                "ETag": frame_hash,
+                "X-Timestamp": str(int(screen_streamer.latest_frame_ts * 1000))
+            }
+            
+            if use_gzip:
+                content = gzip.compress(screen_streamer.latest_frame, compresslevel=6)
+                headers["Content-Encoding"] = "gzip"
+                headers["Vary"] = "Accept-Encoding"
+            
+            return Response(
+                content=content,
+                media_type="image/jpeg",
+                headers=headers
+            )
+        # Fallback to 204 if no frame available
         return Response(status_code=204)
     elif status == 'locked':
         # Return 423 Locked
@@ -213,7 +256,7 @@ async def _generate_mjpeg_stream() -> AsyncGenerator[bytes, None]:
     last_frame_hash = None
     consecutive_errors = 0
     max_consecutive_errors = 20
-    target_fps = screen_streamer.fps if screen_streamer.fps > 0 else 30.0
+    target_fps = screen_streamer.fps if screen_streamer.fps > 0 else 60.0
     frame_interval = 1.0 / target_fps
     
     # Check if device is available before starting stream

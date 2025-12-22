@@ -16,14 +16,17 @@ class ScreenStreamer:
         self.is_streaming = False
         self.stream_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
-        self.fps = 30.0 # Increased for smoother mirror (User requested at least 30)
+        self.fps = 60.0 # Increased to 60fps for smoother animations
         # Default settings for smooth streaming
         self.quality = 50
         self.max_width = 540
         
         # Screenshot method cache (remember fastest method)
-        self._fastest_method = None  # 'gzip', 'raw', or None (auto-detect)
-        self._method_performance = {}  # Track method performance
+        self._fastest_method = None  # 'raw', 'gzip', 'png', or None (auto-detect)
+        self._method_performance = {}  # Track method performance: {'raw': [durations...], 'gzip': [durations...], 'png': [durations...]}
+        self._method_performance_samples = 5  # Number of samples to keep per method
+        self._method_evaluation_interval = 30  # Re-evaluate method every 30 seconds
+        self._last_method_evaluation = 0.0
         
         self.latest_frame: Optional[bytes] = None
         self.latest_frame_ts: float = 0.0
@@ -32,7 +35,7 @@ class ScreenStreamer:
         # Screen state cache (to reduce ADB calls)
         self._screen_on_cache: Optional[bool] = None
         self._screen_check_ts: float = 0.0
-        self._screen_cache_ttl: float = 2.0  # Cache for 2 seconds
+        self._screen_cache_ttl: float = 5.0  # Cache for 5 seconds (increased for better performance)
         self._screen_cache_lock = threading.Lock()  # Lock for screen cache
         self._frame_lock = threading.Lock()  # Lock for frame updates
         
@@ -75,7 +78,16 @@ class ScreenStreamer:
                         pass  # Fall through to on-demand capture
                 else:
                     # No frame cached yet, but streaming is active
-                    # Fallback to on-demand capture to avoid black screen
+                    # Wait a bit for background thread to capture first frame (max 500ms)
+                    # This avoids unnecessary on-demand capture when streaming just started
+                    for _ in range(5):
+                        await asyncio.sleep(0.1)
+                        with self._frame_lock:
+                            if self.latest_frame and self.latest_frame_ts > 0:
+                                frame_age = time.time() - self.latest_frame_ts
+                                if frame_age < 5.0:
+                                    return self.latest_frame, 'new'
+                    # Still no frame after waiting, fallback to on-demand capture
                     pass  # Fall through to on-demand capture
         
         # On-demand capture (fallback when streaming is not active or no cached frame)
@@ -108,12 +120,27 @@ class ScreenStreamer:
             # Run blocking ADB call with reasonable timeout
             # Use 5 seconds timeout - balance between speed and reliability
             # Too short timeout causes frequent failures and black screens
+            # Use preferred method if available for better performance
+            preferred_method = self._get_preferred_method()
+            method_start = time.time()
             screenshot = factory.get_screenshot(
                 device_id, 
                 quality=self.quality, 
                 max_width=self.max_width,
-                timeout=5  # 5 seconds - enough for slow devices but not too long
+                timeout=5,  # 5 seconds - enough for slow devices but not too long
+                preferred_method=preferred_method
             )
+            method_duration = time.time() - method_start
+            
+            # Record method performance (only if we successfully got screenshot)
+            if screenshot and screenshot.jpeg_data:
+                # Determine which method was actually used
+                # Since we can't know for sure, we'll infer from preferred_method or track all attempts
+                # For now, we'll track based on preferred_method if it was used
+                if preferred_method:
+                    self._record_method_performance(preferred_method, method_duration)
+                # Re-evaluate fastest method periodically
+                self._evaluate_fastest_method()
             
             if screenshot and screenshot.jpeg_data:
                 # Use hash comparison for faster detection
@@ -124,9 +151,14 @@ class ScreenStreamer:
                 with self._frame_lock:
                     # Compare hash instead of full data
                     if self.latest_frame_hash == frame_hash:
+                        # Frame content unchanged, but still update timestamp to ensure real-time updates
+                        # This ensures every captured frame is available, even if content is the same
+                        self.latest_frame_ts = time.time()
                         capture_duration = time.time() - capture_start
                         self._record_capture_time(capture_duration)
-                        return self.latest_frame, 'unchanged'
+                        # Return 'new' instead of 'unchanged' to ensure frame is pushed
+                        # This maintains real-time frame delivery even when content doesn't change
+                        return self.latest_frame, 'new'
 
                     # Frame changed - update cache
                     self.latest_frame = screenshot.jpeg_data
@@ -138,15 +170,17 @@ class ScreenStreamer:
                 if frame_changed:
                     self._notify_screen_change()
                 
-                # Always broadcast via WebSocket if there are connections (even if unchanged)
-                # This ensures continuous streaming similar to HTTP polling behavior
+                # Always broadcast via WebSocket if there are connections
+                # For frame changes, broadcast immediately for smooth animation
+                # For unchanged frames, also broadcast to maintain continuous stream
                 if stream_manager.frame_connections and self.latest_frame:
                     try:
                         # Use asyncio.run_coroutine_threadsafe to call async function from sync thread
                         loop = stream_manager.main_loop
                         if loop and loop.is_running():
-                            # Schedule the coroutine to run in the event loop
-                            future = asyncio.run_coroutine_threadsafe(
+                            # Schedule the coroutine to run in the event loop immediately
+                            # This ensures frames are pushed as soon as they're captured
+                            asyncio.run_coroutine_threadsafe(
                                 stream_manager.broadcast_frame(
                                     self.latest_frame, 
                                     self.latest_frame_ts
@@ -173,6 +207,42 @@ class ScreenStreamer:
         self._capture_times.append(duration)
         if len(self._capture_times) > self._max_capture_history:
             self._capture_times.pop(0)
+    
+    def _record_method_performance(self, method: str, duration: float):
+        """Record performance of a screenshot method."""
+        if method not in self._method_performance:
+            self._method_performance[method] = []
+        self._method_performance[method].append(duration)
+        # Keep only recent samples
+        if len(self._method_performance[method]) > self._method_performance_samples:
+            self._method_performance[method].pop(0)
+    
+    def _evaluate_fastest_method(self):
+        """Evaluate and update the fastest screenshot method based on recent performance."""
+        now = time.time()
+        # Only re-evaluate periodically to avoid overhead
+        if now - self._last_method_evaluation < self._method_evaluation_interval:
+            return
+        
+        self._last_method_evaluation = now
+        
+        # Calculate average duration for each method
+        method_avg_times = {}
+        for method, durations in self._method_performance.items():
+            if durations:
+                method_avg_times[method] = sum(durations) / len(durations)
+        
+        # Find fastest method
+        if method_avg_times:
+            fastest_method = min(method_avg_times.items(), key=lambda x: x[1])[0]
+            if fastest_method != self._fastest_method:
+                self._fastest_method = fastest_method
+                # Optional: log method change for debugging
+                # print(f"[ScreenStreamer] Fastest method changed to: {fastest_method} (avg: {method_avg_times[fastest_method]:.3f}s)", flush=True)
+    
+    def _get_preferred_method(self) -> Optional[str]:
+        """Get the preferred screenshot method based on performance history."""
+        return self._fastest_method
     
     def _get_actual_fps(self) -> float:
         """Calculate actual FPS based on recent capture times."""
@@ -239,7 +309,7 @@ class ScreenStreamer:
         Background thread loop that continuously captures frames at configured FPS.
         Uses dynamic frame interval based on actual capture time to maintain target FPS.
         """
-        target_frame_interval = 1.0 / self.fps if self.fps > 0 else 0.033  # Default to ~30fps
+        target_frame_interval = 1.0 / self.fps if self.fps > 0 else 0.0167  # Default to ~60fps
         consecutive_errors = 0
         max_consecutive_errors = 20  # Increased to avoid stopping stream too easily
         
@@ -278,7 +348,13 @@ class ScreenStreamer:
                     time.sleep(backoff)
                 elif status == 'unchanged':
                     # Frame unchanged is normal, not an error
+                    # But we should still update timestamp to ensure real-time frame delivery
+                    # This ensures every captured frame is available, even if content is the same
                     consecutive_errors = 0
+                    # Update timestamp even for unchanged frames to maintain real-time updates
+                    with self._frame_lock:
+                        if self.latest_frame:
+                            self.latest_frame_ts = time.time()
                     # Still broadcast cached frame via WebSocket to maintain continuous stream
                     # This matches HTTP polling behavior where we always get the latest frame
                     if stream_manager.frame_connections and self.latest_frame:
@@ -297,17 +373,18 @@ class ScreenStreamer:
                     # Still wait for target interval to maintain consistent FPS
                     remaining_time = target_frame_interval - capture_duration
                     if remaining_time > 0:
-                        time.sleep(min(remaining_time, 0.033))  # Cap at ~30ms
+                        # Use precise sleep for smooth frame rate (cap at target interval)
+                        time.sleep(min(remaining_time, target_frame_interval))
                     else:
-                        time.sleep(0.001)  # Minimal wait
+                        time.sleep(0.001)  # Minimal wait if capture took too long
                 else:
                     # Dynamic frame interval: adjust based on actual capture time
                     # If capture took longer than target interval, use minimal wait
                     # Otherwise, wait for remaining time to maintain target FPS
                     remaining_time = target_frame_interval - capture_duration
                     if remaining_time > 0:
-                        # Use smaller sleep to maintain smooth frame rate
-                        time.sleep(min(remaining_time, 0.033))  # Cap at ~30ms
+                        # Use precise sleep for smooth frame rate (cap at target interval)
+                        time.sleep(min(remaining_time, target_frame_interval))
                     else:
                         # Capture took too long, minimal wait to avoid CPU spinning
                         # But don't wait too long to maintain responsiveness

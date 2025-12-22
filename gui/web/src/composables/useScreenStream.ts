@@ -255,16 +255,20 @@ export function useScreenStream(
               
               // Always update if timestamp is newer, or if it's the same (for continuous updates)
               // This matches HTTP behavior where we update even if timestamp is same
+              // For smooth animations, update immediately without waiting
               if (currentTs >= lastFrameTs.value) {
                 lastFrameTs.value = currentTs
                 frameReceiveTime = Date.now()
                 
-                // Clean up old blob URL
-                if (latestScreenshot.value && latestScreenshot.value.startsWith('blob:')) {
-                  URL.revokeObjectURL(latestScreenshot.value)
-                }
-                
+                // Clean up old blob URL asynchronously to avoid blocking frame update
+                const oldUrl = latestScreenshot.value
+                // Update frame immediately for smooth animation
                 latestScreenshot.value = url
+                
+                // Clean up old URL after a short delay to avoid blocking
+                if (oldUrl && oldUrl.startsWith('blob:')) {
+                  setTimeout(() => URL.revokeObjectURL(oldUrl), 100)
+                }
                 
                 // Update FPS - count all frames received
                 frameCount++
