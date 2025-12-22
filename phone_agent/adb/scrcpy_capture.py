@@ -15,6 +15,8 @@ import queue
 import os
 import select
 import sys
+import socket
+import struct
 from typing import Optional
 from dataclasses import dataclass
 from io import BytesIO
@@ -36,6 +38,8 @@ class ScrcpyConnection:
     bit_rate: int = 2000000  # 2Mbps
     max_fps: int = 60
     fifo_path: Optional[str] = None  # Path to named pipe (FIFO)
+    socket_conn: Optional[socket.socket] = None  # Direct socket connection
+    socket_port: Optional[int] = None  # Port for socket connection
     
     def __post_init__(self):
         if self.frame_queue is None:
@@ -267,6 +271,121 @@ def _read_png_from_stream(stream, timeout=0.5) -> Optional[Image.Image]:
         return None
 
 
+def _scrcpy_socket_frame_reader(conn: ScrcpyConnection):
+    """Background thread to read frames from scrcpy socket and decode with ffmpeg."""
+    try:
+        if not conn.socket_conn:
+            print(f"[Scrcpy] Socket frame reader: socket not available", flush=True)
+            return
+        
+        print(f"[Scrcpy] Socket frame reader: Started, reading H.264 from socket...", flush=True)
+        
+        # Start ffmpeg to decode H.264 stream
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-loglevel", "warning",
+            "-f", "h264",  # Input format is raw H.264
+            "-i", "pipe:0",  # Read from stdin
+            "-f", "image2pipe",  # Output as image stream
+            "-vcodec", "png",  # PNG format
+            "-pix_fmt", "rgb24",  # Use RGB24 pixel format
+            "-vsync", "0",  # Don't sync video
+            "-"  # Output to stdout
+        ]
+        
+        print(f"[Scrcpy] Starting ffmpeg for socket stream: {' '.join(ffmpeg_cmd)}", flush=True)
+        
+        ffmpeg_process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0
+        )
+        
+        conn.ffmpeg_process = ffmpeg_process
+        
+        frame_count = 0
+        error_count = 0
+        
+        # Read H.264 packets from socket and feed to ffmpeg
+        def feed_ffmpeg():
+            try:
+                while conn.running and ffmpeg_process.poll() is None:
+                    h264_data = _read_h264_from_socket(conn.socket_conn)
+                    if h264_data:
+                        try:
+                            ffmpeg_process.stdin.write(h264_data)
+                            ffmpeg_process.stdin.flush()
+                        except BrokenPipeError:
+                            print(f"[Scrcpy] Socket frame reader: ffmpeg stdin broken pipe", flush=True)
+                            break
+                        except Exception as e:
+                            print(f"[Scrcpy] Socket frame reader: Error writing to ffmpeg: {e}", flush=True)
+                            break
+                    else:
+                        # No data, wait a bit
+                        time.sleep(0.01)
+            except Exception as e:
+                print(f"[Scrcpy] Socket frame reader: Error in feed_ffmpeg: {e}", flush=True)
+            finally:
+                if ffmpeg_process.stdin:
+                    ffmpeg_process.stdin.close()
+        
+        # Start thread to feed H.264 data to ffmpeg
+        feed_thread = threading.Thread(target=feed_ffmpeg, daemon=True, name="scrcpy-socket-feed")
+        feed_thread.start()
+        
+        # Read PNG frames from ffmpeg output
+        time.sleep(2)  # Wait for ffmpeg to start
+        
+        while conn.running:
+            try:
+                if ffmpeg_process.poll() is not None:
+                    print(f"[Scrcpy] Socket frame reader: ffmpeg process exited (code {ffmpeg_process.returncode})", flush=True)
+                    break
+                
+                # Read PNG frame from ffmpeg output
+                img = _read_png_from_stream(ffmpeg_process.stdout, timeout=0.5)
+                if img:
+                    frame_count += 1
+                    error_count = 0
+                    
+                    # Put frame in queue
+                    try:
+                        conn.frame_queue.put_nowait(img)
+                    except queue.Full:
+                        try:
+                            conn.frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        conn.frame_queue.put_nowait(img)
+                    
+                    if frame_count <= 3:
+                        print(f"[Scrcpy] Socket frame reader: Successfully read frame {frame_count} (size: {img.size})", flush=True)
+                else:
+                    error_count += 1
+                    if error_count > 100:
+                        print(f"[Scrcpy] Socket frame reader: Too many errors, stopping", flush=True)
+                        break
+                    
+                time.sleep(0.05)
+            except Exception as e:
+                print(f"[Scrcpy] Socket frame reader: Error: {type(e).__name__}: {e}", flush=True)
+                time.sleep(0.1)
+        
+    except Exception as e:
+        print(f"[Scrcpy] Socket frame reader: Fatal error: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] Socket frame reader: Traceback: {traceback.format_exc()}", flush=True)
+    finally:
+        if conn.socket_conn:
+            try:
+                conn.socket_conn.close()
+            except:
+                pass
+
+
 def _scrcpy_frame_reader(conn: ScrcpyConnection):
     """Background thread to read frames from scrcpy via ffmpeg."""
     try:
@@ -418,6 +537,177 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
         print(f"[Scrcpy] Frame reader: Traceback: {traceback.format_exc()}", flush=True)
 
 
+def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720, 
+                               bit_rate: int = 2000000, max_fps: int = 60, 
+                               port: int = 8886) -> tuple[Optional[subprocess.Popen], Optional[int]]:
+    """Start scrcpy process with socket connection.
+    
+    Uses --port parameter to specify a fixed port, then connects directly to that socket.
+    
+    Returns:
+        (process, port) tuple. port is None if failed.
+    """
+    if not _check_scrcpy_available():
+        print("[Scrcpy] scrcpy not available, cannot start process", flush=True)
+        return None, None
+    
+    try:
+        # Build scrcpy command with --port parameter
+        cmd = ["scrcpy"]
+        
+        if device_id:
+            cmd.extend(["-s", device_id])
+        
+        cmd.extend([
+            "--max-size", str(max_size),
+            "--video-bit-rate", str(bit_rate),
+            "--max-fps", str(max_fps),
+            "--port", str(port),  # Use fixed port for socket connection
+            "--record=-",  # Output to stdout (required, otherwise scrcpy exits with error)
+            "--record-format=mkv",  # Required format for --record=- in scrcpy 3.3.4+
+            "--no-window",
+            "--no-control",
+            "--no-audio",
+        ])
+        
+        print(f"[Scrcpy] Starting scrcpy with socket on port {port}: {' '.join(cmd)}", flush=True)
+        
+        # Start scrcpy process
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env=dict(os.environ, PYTHONUNBUFFERED='1')
+        )
+        
+        # Give scrcpy time to start and establish connection
+        time.sleep(3)  # Wait for scrcpy to start and establish socket
+        
+        if process.poll() is not None:
+            stderr = ""
+            try:
+                if process.stderr:
+                    stderr = process.stderr.read().decode('utf-8', errors='ignore')
+            except Exception as e:
+                print(f"[Scrcpy] Error reading process output: {e}", flush=True)
+            
+            exit_code = process.returncode
+            print(f"[Scrcpy] Process exited immediately (code {exit_code})", flush=True)
+            if stderr:
+                print(f"[Scrcpy] stderr: {stderr}", flush=True)
+            return None, None
+        
+        print(f"[Scrcpy] Process started successfully (PID: {process.pid})", flush=True)
+        return process, port
+        
+    except Exception as e:
+        print(f"[Scrcpy] Failed to start scrcpy process: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
+        return None, None
+
+
+def _connect_scrcpy_socket(port: int, timeout: int = 5) -> Optional[socket.socket]:
+    """Connect directly to scrcpy socket and read H.264 stream.
+    
+    scrcpy protocol:
+    1. Device name (64 bytes, null-terminated)
+    2. Initial configuration (12 bytes)
+    3. Video stream (H.264 NAL units)
+    
+    Returns:
+        socket connection or None if failed.
+    """
+    try:
+        # Connect to localhost:port
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect(('localhost', port))
+        sock.settimeout(None)  # Remove timeout after connection
+        print(f"[Scrcpy] Connected to socket on port {port}", flush=True)
+        
+        # Read device name (64 bytes)
+        device_name = sock.recv(64)
+        if len(device_name) < 64:
+            print(f"[Scrcpy] Failed to read device name (got {len(device_name)} bytes)", flush=True)
+            sock.close()
+            return None
+        
+        device_name_str = device_name.rstrip(b'\x00').decode('utf-8', errors='ignore')
+        print(f"[Scrcpy] Device name: {device_name_str}", flush=True)
+        
+        # Read initial configuration (12 bytes)
+        config = sock.recv(12)
+        if len(config) < 12:
+            print(f"[Scrcpy] Failed to read configuration (got {len(config)} bytes)", flush=True)
+            sock.close()
+            return None
+        
+        # Parse configuration
+        width = struct.unpack('>H', config[0:2])[0]
+        height = struct.unpack('>H', config[2:4])[0]
+        # Other fields are not needed for now
+        
+        print(f"[Scrcpy] Video configuration: {width}x{height}", flush=True)
+        
+        return sock
+        
+    except socket.timeout:
+        print(f"[Scrcpy] Socket connection timeout on port {port}", flush=True)
+        return None
+    except ConnectionRefusedError:
+        print(f"[Scrcpy] Connection refused on port {port} (scrcpy may not be ready)", flush=True)
+        return None
+    except Exception as e:
+        print(f"[Scrcpy] Failed to connect to socket: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
+        return None
+
+
+def _read_h264_from_socket(sock: socket.socket) -> Optional[bytes]:
+    """Read H.264 packet from scrcpy socket.
+    
+    scrcpy video packet format:
+    - 1 byte: flags (0x00 = keyframe, 0x01 = P-frame, etc.)
+    - 4 bytes: PTS (presentation timestamp) in microseconds
+    - 4 bytes: packet size
+    - N bytes: H.264 data
+    
+    Returns:
+        H.264 data bytes or None if failed.
+    """
+    try:
+        # Read packet header (9 bytes)
+        header = sock.recv(9)
+        if len(header) < 9:
+            return None
+        
+        flags = header[0]
+        pts = struct.unpack('>I', header[1:5])[0]
+        size = struct.unpack('>I', header[5:9])[0]
+        
+        # Safety check
+        if size > 10 * 1024 * 1024:  # Max 10MB
+            print(f"[Scrcpy] Suspicious packet size: {size}", flush=True)
+            return None
+        
+        # Read packet data
+        data = b''
+        while len(data) < size:
+            chunk = sock.recv(size - len(data))
+            if not chunk:
+                return None
+            data += chunk
+        
+        return data
+        
+    except Exception as e:
+        print(f"[Scrcpy] Error reading H.264 packet: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
 def _start_scrcpy_process(device_id: str | None, max_size: int = 720, 
                           bit_rate: int = 2000000, max_fps: int = 60, fifo_path: str | None = None) -> tuple[Optional[subprocess.Popen], str | None]:
     """Start scrcpy process with recording to named pipe (FIFO).
@@ -541,8 +831,17 @@ def _start_scrcpy_process(device_id: str | None, max_size: int = 720,
 
 
 def _connect_scrcpy(device_id: str | None, max_size: int = 720, 
-                    bit_rate: int = 2000000, max_fps: int = 60) -> Optional[ScrcpyConnection]:
-    """Connect to scrcpy and start frame reading."""
+                    bit_rate: int = 2000000, max_fps: int = 60, 
+                    use_socket: bool = True) -> Optional[ScrcpyConnection]:
+    """Connect to scrcpy and start frame reading.
+    
+    Args:
+        device_id: Device ID
+        max_size: Maximum size
+        bit_rate: Bit rate
+        max_fps: Maximum FPS
+        use_socket: If True, use direct socket connection instead of FIFO
+    """
     with _connection_lock:
         key = device_id or "default"
         if key in _scrcpy_connections:
@@ -551,13 +850,138 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 print(f"[Scrcpy] Reusing existing connection for device {key}", flush=True)
                 return conn
         
-        print(f"[Scrcpy] Creating new connection for device {key}", flush=True)
+        print(f"[Scrcpy] Creating new connection for device {key} (use_socket={use_socket})", flush=True)
         
-        # Start scrcpy process with named pipe
-        process, fifo_path = _start_scrcpy_process(device_id, max_size, bit_rate, max_fps)
-        if not process or not fifo_path:
-            print("[Scrcpy] Failed to start scrcpy process or create FIFO", flush=True)
-            return None
+        if use_socket:
+            # Use stdout pipe (simpler than FIFO, and scrcpy requires --record)
+            # scrcpy's --port is for control connection, video stream is via ADB port forward
+            # So we use --record=- to output to stdout, then read from stdout
+            process, _ = _start_scrcpy_with_socket(device_id, max_size, bit_rate, max_fps, port=8886)
+            if not process:
+                print("[Scrcpy] Failed to start scrcpy process with stdout output", flush=True)
+                return None
+            
+            # Use ffmpeg to decode H.264 from MKV stream (from stdout)
+            try:
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-loglevel", "warning",
+                    "-probesize", "32768",
+                    "-analyzeduration", "1000000",
+                    "-fflags", "nobuffer+discardcorrupt",
+                    "-flags", "low_delay",
+                    "-thread_queue_size", "512",
+                    "-f", "matroska",  # Input format is MKV (from scrcpy --record-format=mkv)
+                    "-i", "pipe:0",  # Read from stdin (scrcpy stdout)
+                    "-f", "image2pipe",  # Output as image stream
+                    "-vcodec", "png",  # PNG format
+                    "-pix_fmt", "rgb24",  # Use RGB24 pixel format
+                    "-vsync", "0",  # Don't sync video
+                    "-"  # Output to stdout
+                ]
+                
+                print(f"[Scrcpy] Starting ffmpeg for stdout stream: {' '.join(ffmpeg_cmd)}", flush=True)
+                
+                ffmpeg_process = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdin=process.stdout,  # Read from scrcpy stdout
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0
+                )
+                
+                # Start thread to monitor ffmpeg stderr
+                def monitor_ffmpeg_stderr():
+                    try:
+                        if ffmpeg_process.stderr:
+                            output_lines = []
+                            while ffmpeg_process.poll() is None:
+                                line = ffmpeg_process.stderr.readline()
+                                if line:
+                                    decoded = line.decode('utf-8', errors='ignore').strip()
+                                    if decoded:
+                                        output_lines.append(decoded)
+                                        print(f"[Scrcpy] ffmpeg stderr: {decoded}", flush=True)
+                                else:
+                                    time.sleep(0.1)
+                            # If process exited, print all output
+                            if output_lines:
+                                print(f"[Scrcpy] ffmpeg: All output: {output_lines}", flush=True)
+                    except Exception as e:
+                        print(f"[Scrcpy] Error monitoring ffmpeg stderr: {e}", flush=True)
+                
+                stderr_monitor = threading.Thread(target=monitor_ffmpeg_stderr, daemon=True, name="ffmpeg-stderr-monitor")
+                stderr_monitor.start()
+                
+                # Start thread to monitor scrcpy stderr
+                def monitor_scrcpy_stderr():
+                    try:
+                        if process.stderr:
+                            while process.poll() is None:
+                                line = process.stderr.readline()
+                                if line:
+                                    decoded = line.decode('utf-8', errors='ignore').strip()
+                                    if decoded:
+                                        print(f"[Scrcpy] scrcpy stderr: {decoded}", flush=True)
+                                else:
+                                    time.sleep(0.1)
+                    except Exception as e:
+                        print(f"[Scrcpy] Error monitoring scrcpy stderr: {e}", flush=True)
+                
+                scrcpy_stderr_monitor = threading.Thread(target=monitor_scrcpy_stderr, daemon=True, name="scrcpy-stderr-monitor")
+                scrcpy_stderr_monitor.start()
+                
+                # Check if scrcpy stdout has data (peek at first few bytes)
+                time.sleep(2)  # Wait for scrcpy to start outputting
+                if sys.platform != 'win32':
+                    try:
+                        fd = process.stdout.fileno()
+                        ready, _, _ = select.select([fd], [], [], 0.1)
+                        if ready:
+                            print(f"[Scrcpy] scrcpy stdout is readable (fd={fd})", flush=True)
+                        else:
+                            print(f"[Scrcpy] scrcpy stdout not ready yet (fd={fd})", flush=True)
+                    except Exception as e:
+                        print(f"[Scrcpy] Error checking scrcpy stdout: {e}", flush=True)
+                
+                # Don't close scrcpy stdout - ffmpeg needs it to read data
+                # process.stdout.close()  # DON'T close - ffmpeg reads from it
+                
+                # Create connection object
+                conn = ScrcpyConnection(
+                    device_id=key,
+                    process=process,
+                    ffmpeg_process=ffmpeg_process,
+                    running=True,
+                    max_size=max_size,
+                    bit_rate=bit_rate,
+                    max_fps=max_fps
+                )
+                
+                # Start frame reader thread (use regular frame reader, not socket reader)
+                conn.thread = threading.Thread(
+                    target=_scrcpy_frame_reader,
+                    args=(conn,),
+                    daemon=True,
+                    name=f"scrcpy-stdout-reader-{key}"
+                )
+                conn.thread.start()
+                
+                _scrcpy_connections[key] = conn
+                print(f"[Scrcpy] Connection established successfully for device {key} (stdout mode)", flush=True)
+                return conn
+            except Exception as e:
+                print(f"[Scrcpy] Failed to start ffmpeg: {type(e).__name__}: {e}", flush=True)
+                import traceback
+                print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
+                process.terminate()
+                return None
+        else:
+            # Use FIFO (original method)
+            process, fifo_path = _start_scrcpy_process(device_id, max_size, bit_rate, max_fps)
+            if not process or not fifo_path:
+                print("[Scrcpy] Failed to start scrcpy process or create FIFO", flush=True)
+                return None
         
         # Start ffmpeg to decode H.264 stream to images
         try:
@@ -872,6 +1296,14 @@ def _disconnect_scrcpy(device_id: str | None):
             if conn.thread:
                 conn.thread.join(timeout=1.0)
             
+            # Clean up socket connection
+            if conn.socket_conn:
+                try:
+                    conn.socket_conn.close()
+                    print(f"[Scrcpy] Closed socket connection on port {conn.socket_port}", flush=True)
+                except Exception as e:
+                    print(f"[Scrcpy] Failed to close socket: {e}", flush=True)
+            
             # Clean up FIFO
             if conn.fifo_path and os.path.exists(conn.fifo_path):
                 try:
@@ -905,7 +1337,7 @@ def get_screenshot_scrcpy(device_id: str | None = None, timeout: int = 10,
     """
     try:
         # Connect to scrcpy
-        conn = _connect_scrcpy(device_id, max_width, bit_rate, max_fps)
+        conn = _connect_scrcpy(device_id, max_width, bit_rate, max_fps, use_socket=True)
         if not conn:
             print(f"[Scrcpy] get_screenshot_scrcpy: Failed to connect for device {device_id}", flush=True)
             return None
