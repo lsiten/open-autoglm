@@ -36,7 +36,7 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
         timeout: Timeout in seconds for screenshot operations.
         quality: JPEG quality (1-100).
         max_width: Maximum width to resize to (maintains aspect ratio).
-        preferred_method: Optional preferred method ('raw', 'gzip', 'png'). If specified and fails, will try other methods.
+        preferred_method: Optional preferred method ('scrcpy', 'raw', 'gzip', 'png'). If specified and fails, will try other methods.
 
     Returns:
         Screenshot object containing base64 data and dimensions.
@@ -44,9 +44,34 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
     Note:
         If the screenshot fails (e.g., on sensitive screens like payment pages),
         a black fallback image is returned with is_sensitive=True.
+        
+        Methods are tried in order:
+        1. scrcpy (if available, fastest method using H.264 stream)
+        2. raw (fastest ADB method)
+        3. gzip (good for USB 2.0/WiFi)
+        4. png (fallback, most compatible)
     """
     start_time = time.time()
     adb_prefix = _get_adb_prefix(device_id)
+    
+    # Try scrcpy first if preferred or if no preference specified (highest performance)
+    if preferred_method == 'scrcpy' or preferred_method is None:
+        try:
+            from .scrcpy_capture import get_screenshot_scrcpy
+            res = get_screenshot_scrcpy(device_id, timeout, quality, max_width)
+            if res:
+                return res
+        except ImportError:
+            # scrcpy module not available, continue to other methods
+            pass
+        except Exception as e:
+            # scrcpy failed, continue to other methods
+            if preferred_method == 'scrcpy':
+                # If scrcpy was preferred but failed, try other methods
+                pass
+            else:
+                # If scrcpy was not preferred, silently continue
+                pass
 
     # If preferred method is specified, try it first
     if preferred_method == 'raw':

@@ -22,7 +22,7 @@ class ScreenStreamer:
         self.max_width = 540
         
         # Screenshot method cache (remember fastest method)
-        self._fastest_method = None  # 'raw', 'gzip', 'png', or None (auto-detect)
+        self._fastest_method = None  # 'scrcpy', 'raw', 'gzip', 'png', or None (auto-detect)
         self._method_performance = {}  # Track method performance: {'raw': [durations...], 'gzip': [durations...], 'png': [durations...]}
         self._method_performance_samples = 5  # Number of samples to keep per method
         self._method_evaluation_interval = 30  # Re-evaluate method every 30 seconds

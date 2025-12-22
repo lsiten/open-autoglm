@@ -10,6 +10,7 @@ from ..services.device_manager import device_manager
 from ..services.screen_streamer import screen_streamer
 from ..services.stream_manager import stream_manager
 from ..services.recording_manager import recording_manager
+from ..services.video_streamer import video_streamer
 from phone_agent.device_factory import get_device_factory, set_device_type, DeviceType
 
 router = APIRouter()
@@ -401,3 +402,36 @@ async def stream_websocket(websocket: WebSocket):
         pass
     finally:
         stream_manager.disconnect_frame_stream(websocket)
+
+
+@router.get("/stream/video")
+async def get_video_stream():
+    """
+    HTTP endpoint for fragmented MP4 video streaming.
+    Provides real-time video stream from scrcpy via HTTP chunked transfer.
+    Uses ffmpeg to convert H.264 to fragmented MP4 for browser playback via MSE API.
+    
+    Client should use MSE (MediaSource Extensions) API to play the stream:
+    ```javascript
+    const mediaSource = new MediaSource();
+    const video = document.createElement('video');
+    video.src = URL.createObjectURL(mediaSource);
+    
+    mediaSource.addEventListener('sourceopen', () => {
+      const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+      // Fetch stream and append chunks to sourceBuffer
+    });
+    ```
+    """
+    return StreamingResponse(
+        video_streamer.generate_mp4_stream(),
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "Transfer-Encoding": "chunked",
+            "Content-Type": "video/mp4"
+        }
+    )
