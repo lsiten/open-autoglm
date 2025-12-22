@@ -103,6 +103,34 @@
     </div>
 
     <div class="flex items-center gap-3">
+      <!-- Recording Button -->
+      <el-tooltip :content="isRecording ? t('recording.stop') : t('recording.start')" placement="bottom">
+        <el-button 
+          v-if="activeDeviceId" 
+          circle 
+          :type="isRecording ? 'danger' : 'default'"
+          :class="isRecording ? '!bg-red-600 hover:!bg-red-700' : '!bg-gray-800 !border-gray-700 hover:!bg-gray-700'"
+          :loading="startingRecording"
+          :disabled="startingRecording"
+          @click="$emit('toggle-recording')"
+        >
+          <el-icon v-if="isRecording && !startingRecording"><VideoPause /></el-icon>
+          <el-icon v-else-if="!startingRecording"><VideoCamera /></el-icon>
+        </el-button>
+      </el-tooltip>
+
+      <!-- Recordings List Button -->
+      <el-tooltip :content="t('recording.recordings')" placement="bottom">
+        <el-button 
+          v-if="activeDeviceId" 
+          circle 
+          class="!bg-gray-800 !border-gray-700 hover:!bg-gray-700 hover:!text-white" 
+          @click="$emit('show-recordings')"
+        >
+          <el-icon><List /></el-icon>
+        </el-button>
+      </el-tooltip>
+
       <!-- Permissions Button -->
       <el-tooltip :content="t('permissions.title')" placement="bottom">
         <el-button 
@@ -173,7 +201,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Menu, Monitor, ChatLineRound, ArrowDown, Plus, Edit, Delete,
-  Loading, Lock, VideoPlay, VideoPause
+  Loading, Lock, VideoPlay, VideoPause, VideoCamera, List
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -188,6 +216,8 @@ const props = defineProps<{
   startingTask: boolean
   stoppingTask: boolean
   locale: string
+  isRecording: boolean
+  startingRecording?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -201,6 +231,8 @@ const emit = defineEmits<{
   'start-task': []
   'stop-task': []
   'change-locale': [lang: string]
+  'toggle-recording': []
+  'show-recordings': []
 }>()
 
 const { t } = useI18n()

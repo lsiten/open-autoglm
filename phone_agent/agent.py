@@ -27,6 +27,7 @@ class AgentConfig:
     installed_apps: list[dict[str, Any]] | None = None
     system_app_mappings: dict[str, list] | None = None
     llm_prompt_template: str | None = None
+    available_recordings: list[dict[str, Any]] | None = None  # List of available recordings for AI to use
 
     def __post_init__(self):
         if self.system_prompt is None:
@@ -510,7 +511,13 @@ class PhoneAgent:
             )
             # Add screenshot dimensions to help AI understand coordinate system
             screenshot_info = f"\n** Screenshot Dimensions **\nWidth: {screenshot.width}px, Height: {screenshot.height}px"
-            text_content = f"{user_prompt}\n\n{screen_info}{screenshot_info}"
+            
+            # Add recordings info if available
+            recordings_info_text = ""
+            if hasattr(self.agent_config, 'available_recordings') and self.agent_config.available_recordings:
+                recordings_info_text = "\n" + MessageBuilder.build_recordings_info(self.agent_config.available_recordings)
+            
+            text_content = f"{user_prompt}\n\n{screen_info}{screenshot_info}{recordings_info_text}"
 
             self._context.append(
                 MessageBuilder.create_user_message(
@@ -597,6 +604,11 @@ class PhoneAgent:
             # If parsing fails, try to use the raw action as a finish message
             action_message = response.action if response.action else "无法解析模型响应"
             action = finish(message=f"解析动作失败: {action_message}")
+        
+        # CRITICAL: Add thinking to action dict for sensitive operation detection
+        # This allows ActionHandler to check AI's reasoning even if current_app detection fails
+        if hasattr(response, 'thinking') and response.thinking:
+            action['thinking'] = response.thinking
 
         if self.agent_config.verbose:
             # Print thinking process

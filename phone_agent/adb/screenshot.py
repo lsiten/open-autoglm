@@ -47,26 +47,14 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
     start_time = time.time()
     adb_prefix = _get_adb_prefix(device_id)
 
+    # Prioritize fastest method first for mirroring
+    # Raw capture is typically fastest on USB 3.0 and modern devices
     try:
-        # 1. Try Gzip Capture (Best for USB 2.0 / WiFi bandwidth)
-        # NOTE: If device returns black screen on gzip, it might be due to secure screen or weird framebuffer.
-        # Fallback if result is suspicious? For now, trust it.
-        t0 = time.time()
-        res = _get_screenshot_gzip(device_id, timeout, quality, max_width)
-        duration = time.time() - t0
-        # Check if result is valid black (sensitive) or just error?
-        # Gzip function raises exception on error.
-        return res
-    except Exception as e:
-        # print(f"[Perf] Gzip failed: {e}")
-        pass
-
-    try:
-        # 2. Try Raw Capture (Fastest on USB 3.0)
+        # 1. Try Raw Capture first (Fastest on USB 3.0 and modern devices)
         t0 = time.time()
         res = _get_screenshot_raw(device_id, timeout, quality, max_width)
         duration = time.time() - t0
-        if duration > 0.1:
+        if duration > 0.15:
             print(f"[Perf] Raw Capture took: {duration:.3f}s")
         return res
     except Exception as e:
@@ -74,12 +62,25 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
         pass
 
     try:
-        # 3. Fallback to exec-out screencap -p
+        # 2. Try Gzip Capture (Good for USB 2.0 / WiFi bandwidth)
+        # NOTE: If device returns black screen on gzip, it might be due to secure screen or weird framebuffer.
+        t0 = time.time()
+        res = _get_screenshot_gzip(device_id, timeout, quality, max_width)
+        duration = time.time() - t0
+        if duration > 0.15:
+            print(f"[Perf] Gzip Capture took: {duration:.3f}s")
+        return res
+    except Exception as e:
+        # print(f"[Perf] Gzip failed: {e}")
+        pass
+
+    try:
+        # 3. Fallback to exec-out screencap -p (slowest but most compatible)
         t0 = time.time()
         result = subprocess.run(
             adb_prefix + ["exec-out", "screencap", "-p"],
             capture_output=True,
-            timeout=timeout,
+            timeout=timeout,  # Use full timeout for fallback method
         )
 
         if result.returncode != 0:
@@ -122,13 +123,13 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
 
 def _get_screenshot_gzip(device_id: str | None, timeout: int, quality: int, max_width: int) -> Screenshot:
     adb_prefix = _get_adb_prefix(device_id)
-    # Use shell for pipe
+    # Use shell for pipe, use faster compression level (-1 is fastest)
     cmd = adb_prefix + ["shell", "screencap | gzip -1"]
     
     result = subprocess.run(
         cmd,
         capture_output=True,
-        timeout=timeout,
+        timeout=timeout,  # Use full timeout - don't cap it too low
     )
     
     if result.returncode != 0 or not result.stdout:
@@ -163,10 +164,11 @@ def _get_screenshot_gzip(device_id: str | None, timeout: int, quality: int, max_
 
 def _get_screenshot_raw(device_id: str | None, timeout: int, quality: int, max_width: int) -> Screenshot:
     adb_prefix = _get_adb_prefix(device_id)
+    # Use exec-out for direct binary transfer (fastest method)
     result = subprocess.run(
         adb_prefix + ["exec-out", "screencap"],
         capture_output=True,
-        timeout=timeout,
+        timeout=timeout,  # Use full timeout - don't cap it too low
     )
     
     if result.returncode != 0 or not result.stdout:
@@ -211,10 +213,11 @@ def _process_image(img: Image.Image, width: int, height: int, quality: int, max_
     
     buffered = BytesIO()
     # Use JPEG for significantly faster encoding and smaller transfer size
-    # Quality 75 is a good balance for OCR and visual clarity
+    # Optimize encoding for speed: disable optimize and progressive for faster encoding
     if img.mode != "RGB":
         img = img.convert("RGB")
-    img.save(buffered, format="JPEG", quality=quality)
+    # optimize=False and progressive=False for faster encoding (mirroring priority)
+    img.save(buffered, format="JPEG", quality=quality, optimize=False, progressive=False)
     
     jpeg_bytes = buffered.getvalue()
     base64_data = base64.b64encode(jpeg_bytes).decode("utf-8")

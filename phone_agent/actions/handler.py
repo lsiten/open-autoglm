@@ -141,6 +141,7 @@ class ActionHandler:
             "Call_API": self._handle_call_api,
             "Interact": self._handle_interact,
             "AskUserClick": self._handle_ask_user_click,
+            "ExecuteRecording": self._handle_execute_recording,
         }
         return handlers.get(action_name)
 
@@ -243,8 +244,11 @@ class ActionHandler:
         # App not found -> Potential Install
         # Check permission configuration BEFORE attempting installation
         # This ensures that EVERY app installation is checked against configuration
+        print(f"[ActionHandler] App '{app_name}' not found, checking install permission...", flush=True)
         if not self._check_sensitive_permission("install_app", f"安装应用: {app_name}"):
+            print(f"[ActionHandler] Install permission denied for app '{app_name}'", flush=True)
             return ActionResult(False, True, "用户拒绝了应用安装操作")
+        print(f"[ActionHandler] Install permission granted for app '{app_name}', proceeding to installation", flush=True)
 
         # Permission granted, instruct LLM to proceed with installation
         return ActionResult(
@@ -262,6 +266,9 @@ class ActionHandler:
         - If permission is enabled: automatically approves (returns True)
         - If permission is disabled: requests user confirmation via callback (returns True/False based on user response)
         
+        IMPORTANT: This method BLOCKS until user responds. The callback will pause execution
+        and wait for user confirmation before returning.
+        
         Args:
             permission_key: The permission key (e.g., "install_app", "payment", "send_sms")
             message: Human-readable message describing the action
@@ -269,21 +276,28 @@ class ActionHandler:
         Returns:
             True if action is allowed (auto-approved or user confirmed), False if user denied
         """
+        print(f"[ActionHandler] Checking sensitive permission: key='{permission_key}', message='{message}'", flush=True)
+        
         if not self.confirmation_callback:
             # No callback means we can't check permissions - deny by default for safety
-            print(f"[ActionHandler] No confirmation callback available, denying sensitive action: {message}")
+            print(f"[ActionHandler] WARNING: No confirmation callback available, denying sensitive action: {message}", flush=True)
             return False
         
         # Format message with permission key prefix for callback to parse
         # Format: "[PERMISSION:key] message"
         full_msg = f"[PERMISSION:{permission_key}] {message}"
         
+        print(f"[ActionHandler] Calling confirmation callback (this will BLOCK until user responds): {full_msg}", flush=True)
+        
         # Callback will:
         # 1. Parse permission key from message
         # 2. Check device permission configuration
-        # 3. If enabled: auto-approve (return True)
-        # 4. If disabled: request user confirmation (return True/False based on user response)
-        return self.confirmation_callback(full_msg)
+        # 3. If enabled: auto-approve (return True immediately)
+        # 4. If disabled: request user confirmation (BLOCK and wait for user response, then return True/False)
+        result = self.confirmation_callback(full_msg)
+        
+        print(f"[ActionHandler] Confirmation callback returned: {result}", flush=True)
+        return result
 
     def _handle_tap(self, action: dict, width: int, height: int, screenshot_base64: str = None, 
                     screenshot_width: int = None, screenshot_height: int = None) -> ActionResult:
@@ -296,36 +310,164 @@ class ActionHandler:
 
         # Sensitive Action Check
         current = getattr(self, 'current_app', '') or ''
-        current = current.lower()
+        current_lower = current.lower()
+        print(f"[ActionHandler] Tap action - current_app: '{current}'", flush=True)
         
-        # Install App Check - Only check permission if explicitly installing
-        # Check if we're in an app store/market AND the action message indicates installation
+        # Install App Check - Enhanced detection to catch installation attempts
+        # Check if we're in an app store/market by checking both app name and package name
         installer_keywords = ["market", "store", "installer", "应用市场", "应用商店", "play store", "app store"]
-        is_in_installer = any(kw in current for kw in installer_keywords)
+        is_in_installer_by_name = any(kw in current_lower for kw in installer_keywords)
         
-        if is_in_installer:
-            # Check if this is an installation action by examining the action message
-            action_message = action.get("message", "").lower() if isinstance(action.get("message"), str) else ""
-            install_keywords = ["安装", "install", "下载", "download", "获取", "get app"]
-            is_install_action = any(kw in action_message for kw in install_keywords)
+        # Also check if current_app is a known app store package name
+        # Common app store package names (from system_app_mappings)
+        app_store_packages = [
+            "com.huawei.appmarket", "com.xiaomi.market", "com.oppo.market", "com.vivo.appstore",
+            "com.samsung.android.apps.samsungapps", "com.tencent.android.qqdownloader",
+            "com.qihoo.appstore", "com.baidu.appsearch", "com.wandoujia.phoenix2",
+            "com.yingyonghui.market", "com.android.vending",  # Google Play Store
+            "com.huawei.hmsapp.appgallery",  # HarmonyOS
+        ]
+        is_in_installer_by_package = any(pkg in current_lower for pkg in app_store_packages)
+        
+        is_in_installer = is_in_installer_by_name or is_in_installer_by_package
+        print(f"[ActionHandler] Tap action - is_in_installer: {is_in_installer} (by_name={is_in_installer_by_name}, by_package={is_in_installer_by_package})", flush=True)
+        
+        # Extract AI response content to detect installation intent
+        # This is critical: even if current_app doesn't indicate installer, 
+        # we should check AI's response for installation keywords
+        action_message = action.get("message", "").lower() if isinstance(action.get("message"), str) else ""
+        action_thinking = action.get("thinking", "").lower() if isinstance(action.get("thinking"), str) else ""
+        # Also check the raw action dict for any text fields
+        action_text = str(action).lower()
+        action_context = (action_message + " " + action_thinking + " " + action_text).lower()
+        
+        # Expanded install keywords to catch various ways of expressing installation
+        install_keywords = [
+            "安装", "install", "下载", "download", "获取", "get app",
+            "点击安装", "tap install", "点击下载", "tap download",
+            "开始安装", "start install", "确认安装", "confirm install",
+            "立即安装", "install now", "安装应用", "install app",
+            "下载中", "downloading", "安装中", "installing",
+            "应用市场", "app market", "应用商店", "app store",
+            "搜索应用", "search app", "找到应用", "found app"
+        ]
+        is_install_action = any(kw in action_context for kw in install_keywords)
+        
+        # CRITICAL FIX: Check for installation even if not in installer app
+        # This handles cases where current_app detection fails but AI clearly intends to install
+        if is_install_action or is_in_installer:
+            print(f"[ActionHandler] Installation detected - is_install_action: {is_install_action}, is_in_installer: {is_in_installer}, action_context: {action_context[:200]}", flush=True)
             
-            # Only check permission if this is explicitly an installation action
-            if is_install_action:
-                if not self._check_sensitive_permission("install_app", "在应用市场中执行安装操作"):
-                    print(f"[Tap Action] Permission denied for app installation in market")
-                    return ActionResult(False, True, "用户拒绝了应用安装操作")
+            # Try to extract app name from context for better error message
+            app_name = ""
+            import re
+            # Look for patterns like "安装XXX" or "install XXX" or "下载XXX"
+            patterns = [
+                r'(?:安装|install|下载|download)\s*[:：]?\s*([^\s，,。.]+)',
+                r'([^\s，,。.]+)\s*(?:安装|install|下载|download)',
+                r'在应用市场.*?安装\s*[:：]?\s*([^\s，,。.]+)',
+                r'搜索.*?([^\s，,。.]+).*?安装',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, action_context, re.IGNORECASE)
+                if match:
+                    app_name = match.group(1).strip()
+                    # Filter out common words that aren't app names
+                    if app_name and app_name not in ["应用", "app", "软件", "software", "市场", "market", "商店", "store"]:
+                        break
+            
+            # Build permission message
+            if is_in_installer:
+                permission_msg = "在应用市场中执行操作（可能触发应用安装）"
+                if app_name:
+                    permission_msg = f"在应用市场中安装应用: {app_name}"
+                elif is_install_action:
+                    permission_msg = "在应用市场中执行安装操作"
+            else:
+                # Not in installer but AI response indicates installation intent
+                permission_msg = "执行应用安装操作"
+                if app_name:
+                    permission_msg = f"安装应用: {app_name}"
+            
+            print(f"[ActionHandler] Checking permission for installation action: {permission_msg}", flush=True)
+            if not self._check_sensitive_permission("install_app", permission_msg):
+                print(f"[ActionHandler] Permission denied for installation action", flush=True)
+                return ActionResult(False, True, "用户拒绝了应用安装操作")
+            print(f"[ActionHandler] Permission granted for installation action", flush=True)
         
-        # Payment Check
-        if any(app in current for app in ['alipay', 'wallet', 'pay']):
-             if not self._check_sensitive_permission("payment", "Perform payment operation"):
-                 return ActionResult(False, True, "User denied payment operation")
+        # Payment Check - Enhanced detection using both current_app and AI response
+        payment_keywords = ["支付", "payment", "付款", "pay", "转账", "transfer", "充值", "recharge", 
+                           "支付宝", "alipay", "微信支付", "wechat pay", "钱包", "wallet"]
+        is_payment_by_app = any(app in current for app in ['alipay', 'wallet', 'pay'])
+        is_payment_by_context = any(kw in action_context for kw in payment_keywords)
         
-        # Make Call Check
-        if any(app in current for app in ['dialer', 'contact', 'phone']):
-             # Heuristic: Tapping call button (usually green or specific icon) is hard to know without icon detection
-             # But we can be conservative
-             if not self._check_sensitive_permission("make_call", "Make phone call"):
-                 return ActionResult(False, True, "User denied phone call")
+        if is_payment_by_app or is_payment_by_context:
+            print(f"[ActionHandler] Payment detected - is_payment_by_app: {is_payment_by_app}, is_payment_by_context: {is_payment_by_context}", flush=True)
+            permission_msg = "执行支付操作"
+            if is_payment_by_app:
+                permission_msg = "在支付应用中执行操作"
+            elif is_payment_by_context:
+                permission_msg = "执行支付相关操作"
+            if not self._check_sensitive_permission("payment", permission_msg):
+                print(f"[ActionHandler] Permission denied for payment action", flush=True)
+                return ActionResult(False, True, "用户拒绝了支付操作")
+            print(f"[ActionHandler] Permission granted for payment action", flush=True)
+        
+        # Make Call Check - Enhanced detection using both current_app and AI response
+        call_keywords = ["打电话", "make call", "拨打电话", "call", "拨打", "呼叫", "拨号", "dial",
+                        "联系人", "contact", "通话", "phone call"]
+        is_call_by_app = any(app in current for app in ['dialer', 'contact', 'phone'])
+        is_call_by_context = any(kw in action_context for kw in call_keywords)
+        
+        if is_call_by_app or is_call_by_context:
+            print(f"[ActionHandler] Call detected - is_call_by_app: {is_call_by_app}, is_call_by_context: {is_call_by_context}", flush=True)
+            permission_msg = "拨打电话"
+            if is_call_by_app:
+                permission_msg = "在电话应用中执行操作"
+            elif is_call_by_context:
+                permission_msg = "执行拨打电话操作"
+            if not self._check_sensitive_permission("make_call", permission_msg):
+                print(f"[ActionHandler] Permission denied for call action", flush=True)
+                return ActionResult(False, True, "用户拒绝了拨打电话操作")
+            print(f"[ActionHandler] Permission granted for call action", flush=True)
+        
+        # WeChat Reply Check - Enhanced detection using both current_app and AI response
+        # This catches cases where user clicks "Send" button in WeChat
+        wechat_keywords = ["微信", "wechat", "回复", "reply", "发送消息", "send message", 
+                          "tencent.mm", "微信聊天", "wechat chat", "发送", "send"]
+        is_wechat_by_app = 'tencent.mm' in current or 'wechat' in current
+        is_wechat_by_context = any(kw in action_context for kw in wechat_keywords)
+        
+        if is_wechat_by_app or is_wechat_by_context:
+            print(f"[ActionHandler] WeChat reply detected - is_wechat_by_app: {is_wechat_by_app}, is_wechat_by_context: {is_wechat_by_context}", flush=True)
+            permission_msg = "在微信中执行操作（可能触发消息发送）"
+            if is_wechat_by_app:
+                permission_msg = "在微信中执行操作（可能触发消息发送）"
+            elif is_wechat_by_context:
+                permission_msg = "执行微信相关操作（可能触发消息发送）"
+            if not self._check_sensitive_permission("wechat_reply", permission_msg):
+                print(f"[ActionHandler] Permission denied for WeChat reply", flush=True)
+                return ActionResult(False, True, "用户拒绝了微信回复操作")
+            print(f"[ActionHandler] Permission granted for WeChat reply", flush=True)
+        
+        # Send SMS Check - Enhanced detection using both current_app and AI response
+        # This catches cases where user clicks "Send" button in SMS app
+        sms_keywords = ["短信", "sms", "发送短信", "send sms", "发短信", "发信息", "send message",
+                        "mms", "messaging", "消息", "message", "发送", "send"]
+        is_sms_by_app = any(app in current for app in ['mms', 'messaging', 'sms', 'message'])
+        is_sms_by_context = any(kw in action_context for kw in sms_keywords)
+        
+        if is_sms_by_app or is_sms_by_context:
+            print(f"[ActionHandler] SMS detected - is_sms_by_app: {is_sms_by_app}, is_sms_by_context: {is_sms_by_context}", flush=True)
+            permission_msg = "在短信应用中执行操作（可能触发短信发送）"
+            if is_sms_by_app:
+                permission_msg = "在短信应用中执行操作（可能触发短信发送）"
+            elif is_sms_by_context:
+                permission_msg = "执行短信相关操作（可能触发短信发送）"
+            if not self._check_sensitive_permission("send_sms", permission_msg):
+                print(f"[ActionHandler] Permission denied for SMS", flush=True)
+                return ActionResult(False, True, "用户拒绝了发送短信操作")
+            print(f"[ActionHandler] Permission granted for SMS", flush=True)
 
         # Annotate screenshot with click position before executing tap
         # IMPORTANT: x, y are in actual screen coordinates (after conversion from AI's relative coords)
@@ -368,19 +510,39 @@ class ActionHandler:
         current = getattr(self, 'current_app', '') or ''
         current = current.lower()
         
-        # WeChat Reply Check - Check if we're in WeChat
-        if 'tencent.mm' in current or 'wechat' in current:
-            # Check permission configuration - will auto-approve if enabled, or request user confirmation if disabled
-            if not self._check_sensitive_permission("wechat_reply", f"回复微信消息: {text[:50]}..."):
+        # Extract AI response content to detect sensitive operation intent
+        action_message = action.get("message", "").lower() if isinstance(action.get("message"), str) else ""
+        action_thinking = action.get("thinking", "").lower() if isinstance(action.get("thinking"), str) else ""
+        action_text = str(action).lower()
+        action_context = (action_message + " " + action_thinking + " " + action_text).lower()
+        
+        # WeChat Reply Check - Enhanced detection using both current_app and AI response
+        wechat_keywords = ["微信", "wechat", "回复", "reply", "发送消息", "send message", 
+                          "tencent.mm", "微信聊天", "wechat chat"]
+        is_wechat_by_app = 'tencent.mm' in current or 'wechat' in current
+        is_wechat_by_context = any(kw in action_context for kw in wechat_keywords)
+        
+        if is_wechat_by_app or is_wechat_by_context:
+            print(f"[Type Action] WeChat reply detected - is_wechat_by_app: {is_wechat_by_app}, is_wechat_by_context: {is_wechat_by_context}", flush=True)
+            permission_msg = f"回复微信消息: {text[:50]}..."
+            if not self._check_sensitive_permission("wechat_reply", permission_msg):
                 print(f"[Type Action] Permission denied for WeChat reply", flush=True)
                 return ActionResult(False, True, "用户拒绝了微信回复操作")
+            print(f"[Type Action] Permission granted for WeChat reply", flush=True)
 
-        # Send SMS Check - Check if we're in SMS/messaging app
-        if any(app in current for app in ['mms', 'messaging', 'sms']):
-            # Check permission configuration - will auto-approve if enabled, or request user confirmation if disabled
-            if not self._check_sensitive_permission("send_sms", f"发送短信: {text[:50]}..."):
+        # Send SMS Check - Enhanced detection using both current_app and AI response
+        sms_keywords = ["短信", "sms", "发送短信", "send sms", "发短信", "发信息", "send message",
+                        "mms", "messaging", "消息", "message"]
+        is_sms_by_app = any(app in current for app in ['mms', 'messaging', 'sms'])
+        is_sms_by_context = any(kw in action_context for kw in sms_keywords)
+        
+        if is_sms_by_app or is_sms_by_context:
+            print(f"[Type Action] SMS detected - is_sms_by_app: {is_sms_by_app}, is_sms_by_context: {is_sms_by_context}", flush=True)
+            permission_msg = f"发送短信: {text[:50]}..."
+            if not self._check_sensitive_permission("send_sms", permission_msg):
                 print(f"[Type Action] Permission denied for SMS", flush=True)
                 return ActionResult(False, True, "用户拒绝了发送短信操作")
+            print(f"[Type Action] Permission granted for SMS", flush=True)
 
         device_factory = get_device_factory()
 
@@ -545,6 +707,43 @@ class ActionHandler:
             return ActionResult(True, False, message=result_message)
         else:
             return ActionResult(False, False, "User did not provide click annotation")
+    
+    def _handle_execute_recording(self, action: dict, width: int, height: int) -> ActionResult:
+        """Handle ExecuteRecording action - execute a saved recording."""
+        recording_id = action.get("recording_id")
+        if not recording_id:
+            return ActionResult(False, False, "Recording ID not provided")
+        
+        # Import here to avoid circular imports
+        import asyncio
+        try:
+            # Try to get the recording executor callback if available
+            # This should be set by agent_runner
+            if hasattr(self, 'execute_recording_callback') and self.execute_recording_callback:
+                # Execute recording asynchronously
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is running, create a task
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.execute_recording_callback(recording_id),
+                        loop
+                    )
+                    success, message = future.result(timeout=300)  # 5 minute timeout
+                else:
+                    # If loop is not running, run directly
+                    success, message = loop.run_until_complete(
+                        self.execute_recording_callback(recording_id)
+                    )
+                
+                if success:
+                    return ActionResult(True, False, message=message or f"Recording {recording_id} executed successfully")
+                else:
+                    return ActionResult(False, False, message=message or f"Failed to execute recording {recording_id}")
+            else:
+                return ActionResult(False, False, "Recording executor callback not available")
+        except Exception as e:
+            print(f"[ActionHandler] Error executing recording {recording_id}: {e}", flush=True)
+            return ActionResult(False, False, f"Error executing recording: {str(e)}")
 
     def _send_keyevent(self, keycode: str) -> None:
         """Send a keyevent to the device."""

@@ -10,9 +10,9 @@
       </div>
 
       <!-- Connection Error Banner -->
-      <div v-if="!wsConnected && !loadingDevices" class="bg-red-900/20 border-b border-red-900/50 p-2 text-center">
-        <p class="text-[10px] text-red-300 mb-1">{{ t('sidebar.connection_failed') }} {{ wsBaseUrl }}</p>
-        <p v-if="wsError" class="text-[9px] text-red-400 mb-1 font-mono break-all">{{ wsError }}</p>
+      <div v-if="!apiConnected && !loadingDevices" class="bg-red-900/20 border-b border-red-900/50 p-2 text-center">
+        <p class="text-[10px] text-red-300 mb-1">{{ t('sidebar.connection_failed') }}</p>
+        <p v-if="wsError && !wsConnected" class="text-[9px] text-red-400 mb-1 font-mono break-all">{{ wsError }}</p>
         <a :href="`${backendRootUrl}/docs`" target="_blank" class="text-[10px] text-blue-400 underline hover:text-blue-300 block">
           {{ t('sidebar.trust_certificate') }}
         </a>
@@ -144,8 +144,11 @@
       <!-- Sidebar Footer -->
       <div class="p-4 border-t border-gray-800 bg-[#161b22] shrink-0">
         <div class="flex items-center gap-2 text-xs text-gray-500">
-          <div class="w-2 h-2 rounded-full" :class="wsConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-red-500'"></div>
-          <span>{{ wsConnected ? t('sidebar.connected') : t('sidebar.disconnected') }}</span>
+          <div class="w-2 h-2 rounded-full" :class="apiConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-red-500'"></div>
+          <span>{{ apiConnected ? t('sidebar.connected') : t('sidebar.disconnected') }}</span>
+        </div>
+        <div v-if="apiConnected && !wsConnected" class="flex items-center gap-2 text-[10px] text-yellow-500 mt-1">
+          <span>{{ t('sidebar.ws_disconnected') || 'WebSocket未连接' }}</span>
         </div>
       </div>
     </div>
@@ -166,6 +169,7 @@ const props = defineProps<{
   activeDeviceId: string
   loadingDevices: boolean
   wsConnected: boolean
+  apiConnected: boolean
   wsError: string
   wsBaseUrl: string
   backendRootUrl: string

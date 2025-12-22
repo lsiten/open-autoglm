@@ -154,9 +154,10 @@ check_dependencies() {
     echo -e "${GREEN}✓ 依赖检查完成${NC}"
 }
 
-# 检查 ADB 连接（可选）
+# 检查并安装 ADB
 check_adb() {
     if command -v adb &> /dev/null; then
+        # ADB 已安装，检查设备连接
         DEVICES=$(adb devices 2>/dev/null | grep -v "List" | grep "device$" | wc -l | tr -d ' ')
         if [ "$DEVICES" -gt 0 ]; then
             echo -e "${GREEN}✓ 检测到 $DEVICES 个已连接的设备${NC}"
@@ -164,7 +165,127 @@ check_adb() {
             echo -e "${YELLOW}⚠ 未检测到已连接的设备（可选，不影响启动）${NC}"
         fi
     else
-        echo -e "${YELLOW}⚠ 未找到 ADB 工具（可选，不影响启动）${NC}"
+        # ADB 未安装，尝试自动安装
+        echo -e "${YELLOW}⚠ 未找到 ADB 工具，正在尝试自动安装...${NC}"
+        
+        # 检测操作系统类型
+        OS_TYPE="unknown"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            OS_TYPE="macos"
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            OS_TYPE="linux"
+        fi
+        
+        INSTALL_SUCCESS=false
+        
+        if [ "$OS_TYPE" = "macos" ]; then
+            # macOS: 使用 Homebrew 安装
+            if command -v brew &> /dev/null; then
+                echo -e "${BLUE}使用 Homebrew 安装 ADB...${NC}"
+                # 检查是否已安装
+                if brew list android-platform-tools &> /dev/null 2>&1; then
+                    echo -e "${GREEN}✓ ADB 已通过 Homebrew 安装${NC}"
+                    INSTALL_SUCCESS=true
+                else
+                    # 尝试安装
+                    if brew install android-platform-tools >/dev/null 2>&1; then
+                        if command -v adb &> /dev/null; then
+                            INSTALL_SUCCESS=true
+                            echo -e "${GREEN}✓ ADB 安装成功${NC}"
+                        else
+                            # 尝试添加到 PATH
+                            BREW_PREFIX=$(brew --prefix 2>/dev/null)
+                            if [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/bin/adb" ]; then
+                                export PATH="$PATH:$BREW_PREFIX/bin"
+                                if command -v adb &> /dev/null; then
+                                    INSTALL_SUCCESS=true
+                                    echo -e "${GREEN}✓ ADB 安装成功${NC}"
+                                else
+                                    echo -e "${YELLOW}⚠ 安装完成，但可能需要重新加载 PATH${NC}"
+                                    echo -e "${YELLOW}   请运行: export PATH=\$PATH:\$(brew --prefix)/bin${NC}"
+                                fi
+                            fi
+                        fi
+                    else
+                        echo -e "${RED}错误: Homebrew 安装 ADB 失败${NC}"
+                    fi
+                fi
+            else
+                echo -e "${RED}错误: 未找到 Homebrew${NC}"
+                echo -e "${YELLOW}请先安装 Homebrew:${NC}"
+                echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                echo -e "${YELLOW}或手动安装 ADB:${NC}"
+                echo "  下载地址: https://developer.android.com/studio/releases/platform-tools"
+            fi
+        elif [ "$OS_TYPE" = "linux" ]; then
+            # Linux: 检测包管理器并安装
+            if command -v apt-get &> /dev/null; then
+                # Debian/Ubuntu
+                echo -e "${BLUE}使用 apt 安装 ADB...${NC}"
+                if sudo apt-get update -qq && sudo apt-get install -y android-tools-adb 2>&1 | grep -v "already the newest\|0 upgraded"; then
+                    if command -v adb &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ ADB 安装成功${NC}"
+                    fi
+                else
+                    # 检查是否已经安装
+                    if dpkg -l | grep -q android-tools-adb; then
+                        echo -e "${GREEN}✓ ADB 已安装${NC}"
+                        INSTALL_SUCCESS=true
+                    fi
+                fi
+            elif command -v yum &> /dev/null; then
+                # CentOS/RHEL (旧版本)
+                echo -e "${BLUE}使用 yum 安装 ADB...${NC}"
+                if sudo yum install -y android-tools 2>&1 | grep -v "already installed\|Nothing to do"; then
+                    if command -v adb &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ ADB 安装成功${NC}"
+                    fi
+                fi
+            elif command -v dnf &> /dev/null; then
+                # Fedora/CentOS/RHEL (新版本)
+                echo -e "${BLUE}使用 dnf 安装 ADB...${NC}"
+                if sudo dnf install -y android-tools 2>&1 | grep -v "already installed\|Nothing to do"; then
+                    if command -v adb &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ ADB 安装成功${NC}"
+                    fi
+                fi
+            else
+                echo -e "${RED}错误: 未找到支持的包管理器 (apt/yum/dnf)${NC}"
+                echo -e "${YELLOW}请手动安装 ADB:${NC}"
+                echo "  - Debian/Ubuntu: sudo apt-get install android-tools-adb"
+                echo "  - CentOS/RHEL: sudo yum install android-tools"
+                echo "  - Fedora: sudo dnf install android-tools"
+            fi
+        else
+            echo -e "${RED}错误: 无法自动检测操作系统类型${NC}"
+            echo -e "${YELLOW}请手动安装 ADB:${NC}"
+            echo "  - macOS: brew install android-platform-tools"
+            echo "  - Linux: sudo apt-get install android-tools-adb (或使用对应发行版的包管理器)"
+            echo "  - Windows: 下载地址: https://developer.android.com/studio/releases/platform-tools"
+        fi
+        
+        # 验证安装结果
+        if [ "$INSTALL_SUCCESS" = "true" ] || command -v adb &> /dev/null; then
+            # 验证 ADB 是否可用
+            if adb version &> /dev/null; then
+                echo -e "${GREEN}✓ ADB 工具已就绪${NC}"
+                # 检查设备连接
+                DEVICES=$(adb devices 2>/dev/null | grep -v "List" | grep "device$" | wc -l | tr -d ' ')
+                if [ "$DEVICES" -gt 0 ]; then
+                    echo -e "${GREEN}✓ 检测到 $DEVICES 个已连接的设备${NC}"
+                else
+                    echo -e "${YELLOW}⚠ 未检测到已连接的设备（可选，不影响启动）${NC}"
+                fi
+            else
+                echo -e "${YELLOW}⚠ ADB 已安装，但可能需要重新加载 PATH 或重启终端${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠ ADB 安装失败或需要手动安装（可选，不影响启动）${NC}"
+            echo -e "${YELLOW}   如需使用 Android 设备功能，请手动安装 ADB${NC}"
+        fi
     fi
 }
 

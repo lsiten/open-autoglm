@@ -33,7 +33,22 @@
              @mousemove="$emit('mouse-move', $event)"
              @mouseup="$emit('mouse-up', $event)"
              @mouseleave="$emit('mouse-up', $event)">
-          <img v-if="latestScreenshot" :src="latestScreenshot" class="w-full h-full object-fill pointer-events-none select-none" draggable="false" />
+          <!-- MJPEG Stream (if enabled) -->
+          <img v-if="useMjpegStream && mjpegStreamUrl" 
+               ref="mjpegImgRef"
+               :src="mjpegStreamUrl" 
+               class="w-full h-full object-fill pointer-events-none select-none" 
+               draggable="false"
+               @load="onMjpegLoad"
+               @error="onMjpegError"
+               style="display: block;" />
+          
+          <!-- HTTP Polling (default and fallback) -->
+          <img v-else-if="latestScreenshot" 
+               :src="latestScreenshot" 
+               class="w-full h-full object-fill pointer-events-none select-none" 
+               draggable="false"
+               @load="onHttpImageLoad" />
           
           <!-- Loading State -->
           <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-3 bg-[#050505]">
@@ -75,10 +90,11 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDown, VideoCamera, House, Back, Menu } from '@element-plus/icons-vue'
 
-defineProps<{
+const props = defineProps<{
   activeDeviceId: string
   latestScreenshot: string
   isLandscape: boolean
@@ -86,9 +102,11 @@ defineProps<{
   fps: number
   clickEffects: any[]
   qualityOptions: Array<{ key: string }>
+  useMjpegStream?: boolean
+  mjpegStreamUrl?: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'update-quality': [key: string]
   'mouse-down': [event: MouseEvent]
   'mouse-move': [event: MouseEvent]
@@ -96,7 +114,94 @@ defineEmits<{
   'go-home': []
   'go-back': []
   'go-recent': []
+  'mjpeg-error': []
+  'landscape-update': [isLandscape: boolean]
 }>()
+
+const mjpegImgRef = ref<HTMLImageElement | null>(null)
+let mjpegCheckInterval: number | null = null
+
+const checkMjpegOrientation = () => {
+  if (mjpegImgRef.value && mjpegImgRef.value.complete) {
+    const img = mjpegImgRef.value
+    // Use naturalWidth and naturalHeight to get actual image dimensions (not affected by CSS)
+    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+      const newIsLandscape = img.naturalWidth > img.naturalHeight
+      // Only emit if orientation changed to avoid unnecessary updates
+      if (newIsLandscape !== props.isLandscape) {
+        emit('landscape-update', newIsLandscape)
+      }
+    }
+  }
+}
+
+const onMjpegLoad = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  // Wait for image to be fully loaded
+  if (!img.complete) {
+    return
+  }
+  
+  // Use naturalWidth and naturalHeight to get actual image dimensions (not affected by CSS)
+  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+    const newIsLandscape = img.naturalWidth > img.naturalHeight
+    // Always emit on load to ensure correct initial state
+    emit('landscape-update', newIsLandscape)
+  }
+  
+  // For MJPEG stream, also set up periodic check since @load may not fire on every frame update
+  if (props.useMjpegStream && mjpegImgRef.value) {
+    // Clear existing interval if any
+    if (mjpegCheckInterval) {
+      clearInterval(mjpegCheckInterval)
+    }
+    // Check orientation every 500ms for MJPEG stream
+    mjpegCheckInterval = window.setInterval(checkMjpegOrientation, 500)
+  }
+}
+
+const onMjpegError = () => {
+  // MJPEG stream failed, fallback to HTTP polling
+  console.warn('[ScreenMirror] MJPEG stream error, falling back to HTTP polling')
+  // Clear interval if MJPEG stream fails
+  if (mjpegCheckInterval) {
+    clearInterval(mjpegCheckInterval)
+    mjpegCheckInterval = null
+  }
+  emit('mjpeg-error')
+}
+
+// Watch for MJPEG stream URL changes
+watch(() => props.useMjpegStream, (newVal) => {
+  if (!newVal && mjpegCheckInterval) {
+    // Clear interval when MJPEG stream is disabled
+    clearInterval(mjpegCheckInterval)
+    mjpegCheckInterval = null
+  }
+})
+
+onUnmounted(() => {
+  // Clean up interval on component unmount
+  if (mjpegCheckInterval) {
+    clearInterval(mjpegCheckInterval)
+    mjpegCheckInterval = null
+  }
+})
+
+const onHttpImageLoad = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  // Wait for image to be fully loaded
+  if (!img.complete) {
+    return
+  }
+  
+  // Use naturalWidth and naturalHeight to get actual image dimensions (not affected by CSS)
+  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+    const newIsLandscape = img.naturalWidth > img.naturalHeight
+    // Always emit on load to ensure correct initial state
+    emit('landscape-update', newIsLandscape)
+  }
+}
 
 const { t } = useI18n()
 </script>

@@ -9,6 +9,7 @@
       :active-device-id="activeDeviceId"
       :loading-devices="loadingDevices"
       :ws-connected="wsConnected"
+      :api-connected="apiConnected"
       :ws-error="wsError"
       :ws-base-url="wsBaseUrl"
       :backend-root-url="backendRootUrl"
@@ -38,6 +39,8 @@
          :starting-task="startingTask"
          :stopping-task="stoppingTask"
          :locale="locale"
+         :is-recording="isRecording"
+         :starting-recording="startingRecording"
          @toggle-sidebar="sidebarOpen = !sidebarOpen"
          @select-task="selectTask"
          @create-task="openCreateTaskDialog"
@@ -48,6 +51,8 @@
          @start-task="startBackgroundTask"
          @stop-task="stopTask"
          @change-locale="(lang: string) => locale = lang"
+         @toggle-recording="handleToggleRecording"
+         @show-recordings="showRecordingList = true"
        />
 
        <!-- Chat Area -->
@@ -190,6 +195,8 @@
       :fps="fps"
       :click-effects="clickEffects"
       :quality-options="qualityOptions"
+      :use-mjpeg-stream="useMjpegStream"
+      :mjpeg-stream-url="mjpegStreamUrl"
       @update-quality="updateStreamQuality"
       @mouse-down="handleMouseDown"
       @mouse-move="handleMouseMove"
@@ -197,6 +204,8 @@
       @go-home="goHome"
       @go-back="goBack"
       @go-recent="goRecent"
+      @mjpeg-error="useMjpegStream = false"
+      @landscape-update="isLandscape = $event"
     />
 
     <!-- Permissions Dialog -->
@@ -241,6 +250,28 @@
       v-model="showEditTaskDialog"
       :task="taskToEdit"
       @save="handleTaskNameSave"
+    />
+
+    <!-- Recording Dialog -->
+    <RecordingDialog
+      v-model="showRecordingDialog"
+      :action-count="recordingActionCount"
+      :recording-id="recordingId"
+      :on-preview="previewRecording"
+      :on-debug="debugRecording"
+      :on-reset="resetRecordingState"
+      :on-execute-action="executeSingleAction"
+      :on-replace-action="replaceAction"
+      @save="handleSaveRecording"
+    />
+
+    <!-- Recording List Dialog -->
+    <RecordingListDialog
+      v-model="showRecordingList"
+      :recordings="recordings"
+      :loading="recordingLoading"
+      @execute="handleExecuteRecording"
+      @delete="handleDeleteRecording"
     />
 
     <!-- Device Connection Wizard -->
@@ -302,6 +333,8 @@ import ConfirmMessage from '../components/dashboard/messages/ConfirmMessage.vue'
 import InputMessage from '../components/dashboard/messages/InputMessage.vue'
 import ClickAnnotationMessage from '../components/dashboard/messages/ClickAnnotationMessage.vue'
 import StatusMessage from '../components/dashboard/messages/StatusMessage.vue'
+import RecordingDialog from '../components/dashboard/RecordingDialog.vue'
+import RecordingListDialog from '../components/dashboard/RecordingListDialog.vue'
 import { formatThink, formatAnswer } from '../utils/messageFormatter'
 import { detectPlatform, availablePlatforms } from '../utils/platformDetector'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -320,6 +353,7 @@ import { useStreamQuality } from '../composables/useStreamQuality'
 import { useDeviceEdit } from '../composables/useDeviceEdit'
 import { useTaskEdit } from '../composables/useTaskEdit'
 import { useAppMatchingUI } from '../composables/useAppMatchingUI'
+import { useRecording } from '../composables/useRecording'
 
 // --- State ---
 const { t, locale } = useI18n()
@@ -389,6 +423,8 @@ const {
   fps, 
   isStreaming, 
   clickEffects,
+  useMjpegStream,
+  mjpegStreamUrl,
   startStreamLoop: startStreamLoopComposable,
   forceRefreshFrame,
   handleMouseDown,
@@ -424,9 +460,8 @@ const {
       lastFpsTime = now
     }
     latestScreenshot.value = `data:image/jpeg;base64,${data}`
-    const img = new Image()
-    img.onload = () => { isLandscape.value = img.width > img.height }
-    img.src = latestScreenshot.value
+    // Landscape detection is handled by ScreenMirror component via @load event
+    // No need to detect here to avoid conflicts
   },
   (taskId: string, status: string) => {
     // onStatusUpdate
@@ -545,6 +580,7 @@ const deviceAliases = ref<Record<string, string>>({})
 const { 
   devices,
   loadingDevices,
+  apiConnected,
   fetchDevices,
   selectDevice,
   deleteDevice,
@@ -660,6 +696,31 @@ const {
   openPermissions,
   savePermissions
 } = usePermissions(apiBaseUrl, activeDeviceId)
+
+// Initialize recording
+const {
+  isRecording,
+  recordingId,
+  actionCount: recordingActionCount,
+  recordings,
+  loading: recordingLoading,
+  startRecording,
+  stopRecording,
+  saveRecording,
+  fetchRecordings,
+  deleteRecording: deleteRecordingComposable,
+  executeRecording,
+  getRecordingStatus,
+  previewRecording,
+  debugRecording,
+  resetRecordingState,
+  executeSingleAction,
+  replaceAction,
+  startingRecording
+} = useRecording(apiBaseUrl, activeDeviceId)
+
+const showRecordingDialog = ref(false)
+const showRecordingList = ref(false)
 
 // Initialize interaction handlers
 const {
@@ -797,6 +858,55 @@ const handleTaskSave = async (data: any) => {
     if (data.name) await createTask(data)
 }
 
+// Recording handlers
+const handleToggleRecording = async () => {
+  if (isRecording.value) {
+    const recordingId = await stopRecording()
+    if (recordingId && recordingActionCount.value > 0) {
+      showRecordingDialog.value = true
+    }
+  } else {
+    await startRecording()
+    // Start polling for recording status
+    startRecordingStatusPolling()
+  }
+}
+
+const handleSaveRecording = async (name: string, keywords: string[], description?: string) => {
+  const success = await saveRecording(name, keywords, description)
+  if (success) {
+    showRecordingDialog.value = false
+    await fetchRecordings(activeDeviceId.value)
+  }
+}
+
+const handleExecuteRecording = async (recording: any) => {
+  showRecordingList.value = false
+  await executeRecording(recording.id)
+}
+
+const handleDeleteRecording = async (recordingId: string) => {
+  await deleteRecordingComposable(recordingId)
+  await fetchRecordings(activeDeviceId.value)
+}
+
+let recordingStatusInterval: any = null
+const startRecordingStatusPolling = () => {
+  if (recordingStatusInterval) {
+    clearInterval(recordingStatusInterval)
+  }
+  recordingStatusInterval = setInterval(async () => {
+    if (isRecording.value && activeDeviceId.value) {
+      await getRecordingStatus()
+    } else {
+      if (recordingStatusInterval) {
+        clearInterval(recordingStatusInterval)
+        recordingStatusInterval = null
+      }
+    }
+  }, 1000) // Poll every second
+}
+
 const handleTaskNameSave = async (data: any) => {
     if (taskToEdit.value && data.name) await saveTaskName()
 }
@@ -815,6 +925,11 @@ const openCreateTaskDialog = (type: 'chat' | 'background' = 'chat') => {
 const sendMessage = () => sendMessageComposable(input, sending)
 
 onMounted(async () => {
+  // Initialize recording status
+  if (activeDeviceId.value) {
+    await getRecordingStatus()
+    await fetchRecordings(activeDeviceId.value)
+  }
   const savedConfig = await db.getConfig()
   if (savedConfig) {
     // Restore configuration, preserving all fields including apiKey
@@ -876,6 +991,12 @@ watch(activeTaskId, (newId, oldId) => {
 })
 
 onMounted(() => window.addEventListener('keydown', handleImagePreviewKeydown))
+
+onUnmounted(() => {
+  if (recordingStatusInterval) {
+    clearInterval(recordingStatusInterval)
+  }
+})
 onUnmounted(() => window.removeEventListener('keydown', handleImagePreviewKeydown))
 </script>
 

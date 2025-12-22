@@ -14,14 +14,20 @@ export function useScreenStream(
   const isStreaming = ref(false)
   const lastFrameTs = ref(0)
   const clickEffects = ref<Array<{ id: number; x: number; y: number }>>([])
+  const useMjpegStream = ref(true)  // Use MJPEG stream for smoother updates
+  const mjpegStreamUrl = ref('')
   
   let frameCount = 0
   let lastFpsTime = Date.now()
   let activeRequests = 0
   const MAX_CONCURRENT_REQUESTS = 1
-  const THROTTLE_MS = 200
+  const THROTTLE_MS = 0  // No throttle - request immediately for maximum responsiveness
   let lastFetchStartTime = 0
   let fetchController: AbortController | null = null
+  
+  // Performance monitoring
+  let requestStartTime = 0
+  let frameReceiveTime = 0
   
   // Mouse interaction state
   let isDragging = false
@@ -38,20 +44,21 @@ export function useScreenStream(
   }
 
   const tryFetchFrame = async () => {
-    const now = Date.now()
-    if (now - lastFetchStartTime < THROTTLE_MS && activeRequests === 0) {
-      return
-    }
-
+    // Remove throttle check for maximum responsiveness
+    // Only check if there's already an active request
     if (activeRequests >= MAX_CONCURRENT_REQUESTS) return
     activeRequests++
-    lastFetchStartTime = Date.now()
+    requestStartTime = Date.now()
+    lastFetchStartTime = requestStartTime
     
     fetchController = new AbortController()
     
     try {
       const response = await fetch(`${apiBaseUrl}/control/stream/latest`, {
-        headers: { 'Cache-Control': 'no-cache' },
+        headers: { 
+          'Cache-Control': 'no-cache',
+          'Accept-Encoding': 'gzip'  // Request gzip compression
+        },
         signal: fetchController.signal
       })
       
@@ -61,6 +68,7 @@ export function useScreenStream(
         
         if (currentTs > lastFrameTs.value) {
           lastFrameTs.value = currentTs
+          frameReceiveTime = Date.now()
           
           const blob = await response.blob()
           const url = URL.createObjectURL(blob)
@@ -71,58 +79,70 @@ export function useScreenStream(
           
           latestScreenshot.value = url
           
+          // Count FPS only for actual new frames (timestamp changed)
           frameCount++
           const now = Date.now()
-          if (now - lastFpsTime >= 1000) {
-            fps.value = Math.round(frameCount * 1000 / (now - lastFpsTime))
+          const timeElapsed = now - lastFpsTime
+          if (timeElapsed >= 1000) {
+            // Calculate FPS: frames received in the last second
+            fps.value = Math.round((frameCount * 1000) / timeElapsed)
             frameCount = 0
             lastFpsTime = now
           }
           
-          const img = new Image()
-          img.onload = () => { 
-            isLandscape.value = img.width > img.height
-            
-            if (isStreaming.value && activeDeviceId.value) {
-              const elapsed = Date.now() - lastFetchStartTime
-              const delay = Math.max(0, THROTTLE_MS - elapsed)
-              setTimeout(() => tryFetchFrame(), delay)
-            }
-          }
-          img.onerror = () => {
-            console.error(t('debug.frame_load_failed'))
-            if (isStreaming.value && activeDeviceId.value) {
-              setTimeout(() => tryFetchFrame(), 200)
-            }
-          }
-          img.src = url
-        } else {
+          // Landscape detection is handled by ScreenMirror component via @load event
+          // No need to detect here to avoid conflicts
+          
+          // Immediately request next frame without waiting for image load
+          // This ensures continuous streaming
           if (isStreaming.value && activeDeviceId.value) {
-            const elapsed = Date.now() - lastFetchStartTime
-            const delay = Math.max(0, THROTTLE_MS - elapsed)
-            setTimeout(() => tryFetchFrame(), Math.max(10, delay)) 
+            // Request immediately for maximum responsiveness
+            // Use requestAnimationFrame for smoother updates
+            requestAnimationFrame(() => {
+              if (isStreaming.value && activeDeviceId.value) {
+                tryFetchFrame()
+              }
+            })
+          }
+        } else {
+          // Timestamp not updated - frame unchanged, but still retry quickly
+          // Use shorter delay to maintain smooth updates
+          if (isStreaming.value && activeDeviceId.value) {
+            requestAnimationFrame(() => {
+              if (isStreaming.value && activeDeviceId.value) {
+                tryFetchFrame()
+              }
+            })
           }
         }
       } else if (response.status === 204) {
+        // No new content - retry immediately with requestAnimationFrame
         if (isStreaming.value && activeDeviceId.value) {
-          const elapsed = Date.now() - lastFetchStartTime
-          const delay = Math.max(0, THROTTLE_MS - elapsed)
-          setTimeout(() => tryFetchFrame(), Math.max(10, delay))
+          requestAnimationFrame(() => {
+            if (isStreaming.value && activeDeviceId.value) {
+              tryFetchFrame()
+            }
+          })
         }
       } else {
         if (isStreaming.value) {
           if (response.status === 423) {
             console.log('Device locked, waiting...')
             setTimeout(() => tryFetchFrame(), 2000)
+          } else if (response.status === 503) {
+            // Service unavailable - retry quickly but not too aggressively
+            setTimeout(() => tryFetchFrame(), 100)
           } else {
-            setTimeout(() => tryFetchFrame(), 200)
+            // Other errors - retry after short delay
+            setTimeout(() => tryFetchFrame(), 100)
           }
         }
       }
     } catch (e: any) {
       if (e.name === 'AbortError') return
       if (isStreaming.value) {
-        setTimeout(() => tryFetchFrame(), 200)
+        // Network errors - retry after short delay
+        setTimeout(() => tryFetchFrame(), 100)
       }
     } finally {
       activeRequests--
@@ -131,17 +151,74 @@ export function useScreenStream(
   }
 
   const startStreamLoop = async () => {
+    // Don't start multiple loops
+    if (isStreaming.value) {
+      return
+    }
+    
     isStreaming.value = true
     
+    // Reset FPS counters when starting stream
+    frameCount = 0
+    lastFpsTime = Date.now()
+    fps.value = 0
+    
+    // Try MJPEG stream first if enabled
+    if (useMjpegStream.value && activeDeviceId.value) {
+      mjpegStreamUrl.value = `${apiBaseUrl}/control/stream/mjpeg`
+      // MJPEG stream will be handled by img tag directly
+      // Start FPS monitoring for MJPEG stream based on image load events
+      let mjpegFrameCount = 0
+      let mjpegLastFpsTime = Date.now()
+      
+      // Monitor MJPEG stream by checking if URL is accessible
+      // If MJPEG fails, fallback to HTTP polling
+      const checkMjpegHealth = setInterval(() => {
+        if (!isStreaming.value) {
+          clearInterval(checkMjpegHealth)
+          return
+        }
+        // If MJPEG URL is set but no image loaded after 3 seconds, fallback
+        if (mjpegStreamUrl.value && !latestScreenshot.value) {
+          const timeSinceStart = Date.now() - mjpegLastFpsTime
+          if (timeSinceStart > 3000) {
+            console.warn('[useScreenStream] MJPEG stream not loading, falling back to HTTP polling')
+            useMjpegStream.value = false
+            mjpegStreamUrl.value = ''
+            clearInterval(checkMjpegHealth)
+            // Start HTTP polling fallback
+            if (activeRequests === 0) {
+              tryFetchFrame()
+            }
+          }
+        }
+      }, 1000)
+      return
+    }
+    
+    // Fallback to HTTP polling
+    // Start initial frame fetch immediately
     if (activeRequests === 0) {
       tryFetchFrame()
     }
 
+    // Keep the loop running to ensure continuous updates
+    // Use aggressive polling to maintain smooth streaming
     while (isStreaming.value && activeDeviceId.value) {
+      // Check if we need to trigger a new fetch
+      // The recursive calls in tryFetchFrame should handle most updates,
+      // but this loop ensures we don't miss any updates
       if (activeRequests < MAX_CONCURRENT_REQUESTS) {
-        tryFetchFrame()
+        const timeSinceLastFetch = Date.now() - lastFetchStartTime
+        // If it's been too long since last fetch, force a refresh
+        // This ensures updates continue even if recursive calls fail
+        // Use 100ms timeout instead of THROTTLE_MS * 2 (since THROTTLE_MS is 0)
+        if (timeSinceLastFetch > 100) {
+          tryFetchFrame()
+        }
       }
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // More aggressive polling for smoother updates
+      await new Promise(resolve => setTimeout(resolve, 16)) // ~60fps check rate for maximum responsiveness
     }
   }
 
@@ -192,12 +269,22 @@ export function useScreenStream(
       }, 500)
       try {
         await api.post('/control/tap', { x: endX, y: endY })
+        // Force immediate refresh and ensure stream continues
         forceRefreshFrame()
+        // Also ensure stream loop is running (important during recording)
+        if (!isStreaming.value && activeDeviceId.value) {
+          startStreamLoop()
+        }
       } catch (e) { console.error('Tap failed', e) }
     } else {
       try {
         await api.post('/control/swipe', { x1: startX, y1: startY, x2: endX, y2: endY, duration: duration })
+        // Force immediate refresh and ensure stream continues
         forceRefreshFrame()
+        // Also ensure stream loop is running (important during recording)
+        if (!isStreaming.value && activeDeviceId.value) {
+          startStreamLoop()
+        }
       } catch (e) { console.error('Swipe failed', e) }
     }
   }
@@ -205,7 +292,12 @@ export function useScreenStream(
   const goHome = async () => { 
     try { 
       await api.post('/control/home')
-      forceRefreshFrame() 
+      // Force immediate refresh and ensure stream continues
+      forceRefreshFrame()
+      // Also ensure stream loop is running
+      if (!isStreaming.value && activeDeviceId.value) {
+        startStreamLoop()
+      }
     } catch (e) { 
       console.error(e) 
     } 
@@ -214,7 +306,12 @@ export function useScreenStream(
   const goBack = async () => { 
     try { 
       await api.post('/control/back')
-      forceRefreshFrame() 
+      // Force immediate refresh and ensure stream continues
+      forceRefreshFrame()
+      // Also ensure stream loop is running
+      if (!isStreaming.value && activeDeviceId.value) {
+        startStreamLoop()
+      }
     } catch (e) { 
       console.error(e) 
     } 
@@ -223,7 +320,12 @@ export function useScreenStream(
   const goRecent = async () => { 
     try { 
       await api.post('/control/recent')
-      forceRefreshFrame() 
+      // Force immediate refresh and ensure stream continues
+      forceRefreshFrame()
+      // Also ensure stream loop is running
+      if (!isStreaming.value && activeDeviceId.value) {
+        startStreamLoop()
+      }
     } catch (e) { 
       console.error(e) 
     } 
@@ -235,6 +337,8 @@ export function useScreenStream(
     fps,
     isStreaming,
     clickEffects,
+    useMjpegStream,
+    mjpegStreamUrl,
     startStreamLoop,
     forceRefreshFrame,
     getCoords,

@@ -15,6 +15,7 @@ from .task_manager import task_manager, AgentTask
 from .stream_manager import stream_manager
 from .screen_streamer import screen_streamer
 from .config_manager import config_manager
+from .recording_manager import recording_manager
 
 class AgentRunner:
     _instance = None
@@ -72,15 +73,17 @@ class AgentRunner:
             if task and task.device_id:
                 perms = device_manager.get_device_permissions(task.device_id)
                 auto_approved = perms.get(permission_key, False)
-                self._emit_log(task_id, "debug", f"Permission check for '{permission_key}' on device '{task.device_id}': auto_approved={auto_approved}, perms={perms}")
+                self._emit_log(task_id, "info", f"🔒 权限检查: {permission_key} (设备: {task.device_id})")
+                self._emit_log(task_id, "debug", f"权限配置: auto_approved={auto_approved}, 所有权限={perms}")
                 if auto_approved:
-                    self._emit_log(task_id, "info", f"Auto-approved sensitive action: {clean_message}")
+                    self._emit_log(task_id, "info", f"✅ 自动批准敏感操作: {clean_message}")
                     return True
             else:
-                self._emit_log(task_id, "warn", f"Task not found or device_id missing for permission check: task={task}, device_id={task.device_id if task else None}")
+                self._emit_log(task_id, "warn", f"⚠️ 任务未找到或设备ID缺失，无法检查权限: task={task}, device_id={task.device_id if task else None}")
 
         # Need manual confirmation
-        self._emit_log(task_id, "warn", f"Waiting for confirmation: {clean_message}")
+        self._emit_log(task_id, "warn", f"⏸️ 等待用户确认: {clean_message}")
+        self._emit_log(task_id, "info", f"📋 需要用户确认敏感操作: {clean_message}")
         
         # Setup interaction wait
         event = threading.Event()
@@ -123,14 +126,23 @@ class AgentRunner:
         # However, we also need to respect task cancellation
         task_data = self.active_tasks.get(task_id)
         
+        self._emit_log(task_id, "info", f"⏳ AI操作已暂停，等待用户响应...")
+        
         while not event.is_set():
             if task_data and task_data["stop_event"].is_set():
+                self._emit_log(task_id, "warn", f"❌ 任务已取消，拒绝敏感操作")
                 del self.pending_interactions[task_id]
                 return False
             time.sleep(0.5)
             
         response = self.pending_interactions[task_id]["response"]
         del self.pending_interactions[task_id]
+        
+        approved = response == "Yes" or response is True
+        if approved:
+            self._emit_log(task_id, "info", f"✅ 用户已批准，继续执行操作")
+        else:
+            self._emit_log(task_id, "warn", f"❌ 用户已拒绝，取消操作")
         
         approved = response == "Yes" or response == "Allow"
         if approved:
@@ -636,6 +648,18 @@ class AgentRunner:
             # Frontend only sends user-installed apps, so we need to fetch all apps here
             all_apps_for_llm = self._get_all_installed_apps(device_id, installed_apps)
             
+            # Get available recordings for this device
+            available_recordings = recording_manager.list_recordings(device_id=device_id)
+            recordings_info = []
+            for rec in available_recordings:
+                recordings_info.append({
+                    "id": rec.id,
+                    "name": rec.name,
+                    "keywords": rec.keywords,
+                    "description": rec.description,
+                    "action_count": len(rec.actions)
+                })
+            
             # Status callback for long-running tasks (e.g., app installation)
             # NOTE: Currently only used for app installation progress monitoring.
             # Other actions do not send progress messages.
@@ -687,6 +711,22 @@ class AgentRunner:
                 else:
                     print(f"[AgentRunner] Warning: main_loop not running, cannot send status")
             
+            # Recording execution callback
+            async def execute_recording_callback(recording_id: str):
+                """Callback for executing a recording."""
+                from ..services.recording_executor import execute_recording_actions
+                recording = recording_manager.get_recording(recording_id)
+                if not recording:
+                    return False, f"Recording {recording_id} not found"
+                
+                self._emit_log(task.id, "info", f"Executing recording: {recording.name}")
+                success, message = await execute_recording_actions(recording, device_id)
+                if success:
+                    self._emit_log(task.id, "success", f"Recording executed: {message}")
+                else:
+                    self._emit_log(task.id, "error", f"Recording execution failed: {message}")
+                return success, message
+            
             agent = PhoneAgent(
                 model_config=model_config,
                 agent_config=AgentConfig(
@@ -695,7 +735,8 @@ class AgentRunner:
                     installed_apps=all_apps_for_llm,
                     system_app_mappings=system_app_mappings,
                     llm_prompt_template=llm_prompt_template,
-                    system_prompt=system_prompt
+                    system_prompt=system_prompt,
+                    available_recordings=recordings_info
                 ),
                 confirmation_callback=lambda msg: self._confirmation_callback(task.id, msg),
                 input_callback=lambda msg: self._input_callback(task.id, msg),
@@ -703,6 +744,9 @@ class AgentRunner:
                 click_annotation_callback=lambda msg: self._click_annotation_callback(task.id, msg),
                 status_callback=status_callback
             )
+            
+            # Set recording executor callback on action handler
+            agent.action_handler.execute_recording_callback = execute_recording_callback
             
             step_count = 0
             max_steps = 50 # Or infinite for background task?

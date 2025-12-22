@@ -164,9 +164,10 @@ if not exist "gui\web\node_modules" (
 
 echo [✓] 依赖检查完成
 
-REM 检查 ADB 连接（可选）
+REM 检查并安装 ADB
 where adb >nul 2>&1
 if not errorlevel 1 (
+    REM ADB 已安装，检查设备连接
     adb devices >nul 2>&1
     if not errorlevel 1 (
         echo [✓] ADB 工具已就绪
@@ -174,7 +175,77 @@ if not errorlevel 1 (
         echo [警告] 未检测到已连接的设备（可选，不影响启动）
     )
 ) else (
-    echo [警告] 未找到 ADB 工具（可选，不影响启动）
+    REM ADB 未安装，尝试自动安装
+    echo [警告] 未找到 ADB 工具，正在尝试自动安装...
+    
+    set "INSTALL_SUCCESS=0"
+    
+    REM 尝试使用 Chocolatey 安装
+    where choco >nul 2>&1
+    if not errorlevel 1 (
+        echo [信息] 使用 Chocolatey 安装 ADB...
+        choco install adb -y >nul 2>&1
+        if not errorlevel 1 (
+            REM 刷新环境变量（如果 refreshenv 可用）
+            where refreshenv >nul 2>&1
+            if not errorlevel 1 (
+                call refreshenv >nul 2>&1
+            )
+            REM 尝试添加到 PATH（Chocolatey 通常安装到 ProgramData）
+            set "PATH=%PATH%;%ProgramData%\chocolatey\bin"
+            where adb >nul 2>&1
+            if not errorlevel 1 (
+                set "INSTALL_SUCCESS=1"
+                echo [✓] ADB 安装成功
+            )
+        )
+    )
+    
+    REM 如果 Chocolatey 安装失败，尝试使用 winget
+    if "%INSTALL_SUCCESS%"=="0" (
+        where winget >nul 2>&1
+        if not errorlevel 1 (
+            echo [信息] 使用 winget 安装 ADB...
+            winget install --id Google.PlatformTools --accept-package-agreements --accept-source-agreements >nul 2>&1
+            if not errorlevel 1 (
+                REM 刷新 PATH（winget 通常安装到 Program Files）
+                set "PATH=%PATH%;%ProgramFiles%\Android\android-sdk\platform-tools"
+                where adb >nul 2>&1
+                if not errorlevel 1 (
+                    set "INSTALL_SUCCESS=1"
+                    echo [✓] ADB 安装成功
+                )
+            )
+        )
+    )
+    
+    REM 验证安装结果
+    if "%INSTALL_SUCCESS%"=="1" (
+        where adb >nul 2>&1
+        if not errorlevel 1 (
+            adb version >nul 2>&1
+            if not errorlevel 1 (
+                echo [✓] ADB 工具已就绪
+                REM 检查设备连接
+                adb devices >nul 2>&1
+                if not errorlevel 1 (
+                    echo [✓] 检测到已连接的设备
+                ) else (
+                    echo [警告] 未检测到已连接的设备（可选，不影响启动）
+                )
+            ) else (
+                echo [警告] ADB 已安装，但可能需要重新启动终端或刷新环境变量
+            )
+        )
+    ) else (
+        echo [警告] ADB 自动安装失败，请手动安装
+        echo [信息] 手动安装方法：
+        echo   1. 使用 Chocolatey: choco install adb
+        echo   2. 使用 winget: winget install Google.PlatformTools
+        echo   3. 手动下载: https://developer.android.com/studio/releases/platform-tools
+        echo      下载后解压，将 platform-tools 目录添加到系统 PATH 环境变量
+        echo [警告] ADB 未安装（可选，不影响启动）
+    )
 )
 
 echo.

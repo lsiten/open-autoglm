@@ -995,3 +995,30 @@ class MessageBuilder:
         """
         info = {"current_app": current_app, **extra_info}
         return json.dumps(info, ensure_ascii=False)
+    
+    @staticmethod
+    def build_recordings_info(recordings: list[dict]) -> str:
+        """
+        Build recordings info string for the model.
+        
+        Args:
+            recordings: List of recording dictionaries with id, name, keywords, description, action_count.
+        
+        Returns:
+            Formatted string with available recordings.
+        """
+        if not recordings:
+            return ""
+        
+        lines = ["** 可用的录制动作 **"]
+        for rec in recordings:
+            lines.append(f"- {rec['name']} (ID: {rec['id']})")
+            if rec.get('keywords'):
+                lines.append(f"  关键字: {', '.join(rec['keywords'])}")
+            if rec.get('description'):
+                lines.append(f"  描述: {rec['description']}")
+            lines.append(f"  动作数: {rec.get('action_count', 0)}")
+            lines.append("")
+        
+        lines.append("如果任务匹配某个录制的关键字，可以使用 ExecuteRecording 操作执行该录制。")
+        return "\n".join(lines)

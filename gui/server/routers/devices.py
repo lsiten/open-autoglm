@@ -70,10 +70,25 @@ async def webrtc_connect(websocket: WebSocket, token: str):
     except WebSocketDisconnect:
         # Handle disconnect (mark as offline)
         device_manager.handle_webrtc_disconnect(token)
+        # If this was the active device, stop streaming
+        if device_manager.active_device_id:
+            for d in device_manager.webrtc_devices:
+                if d.get("token") == token and d.get("id") == device_manager.active_device_id:
+                    screen_streamer.stop_streaming()
+                    break
 
 @router.get("/", response_model=List[DeviceInfo])
 async def get_devices():
     return device_manager.list_all_devices()
+
+@router.get("/{device_id}", response_model=DeviceInfo)
+async def get_device(device_id: str):
+    """Get a specific device by ID."""
+    devices = device_manager.list_all_devices()
+    for device in devices:
+        if device.id == device_id:
+            return device
+    raise HTTPException(status_code=404, detail=f"Device {device_id} not found")
 
 @router.post("/connect")
 async def connect_device(req: ConnectRequest):
@@ -105,12 +120,23 @@ async def get_device_ip(device_id: str = None):
 
 @router.post("/select")
 async def select_device(req: SelectDeviceRequest):
+    # Stop streaming for previous device if any
+    screen_streamer.stop_streaming()
+    
+    # Set new active device
     device_manager.set_active_device(req.device_id, req.type)
-    # Streaming is now on-demand, no need to start background thread
+    
+    # Start background streaming for the new device
+    screen_streamer.start_streaming()
+    
     return {"status": "selected", "device_id": req.device_id}
 
 @router.delete("/{device_id}")
 async def delete_device(device_id: str):
+    # If deleting the active device, stop streaming
+    if device_manager.active_device_id == device_id:
+        screen_streamer.stop_streaming()
+    
     success = device_manager.remove_device(device_id)
     if not success:
         # Not finding it might mean it's an ADB device which can't be "deleted" per se, 

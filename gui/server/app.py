@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import devices, system, agent, control, tasks
+from .routers import devices, system, agent, control, tasks, recordings
 
 app = FastAPI(title="Open-AutoGLM GUI", version="1.0.0")
 
@@ -18,6 +18,7 @@ app.include_router(devices.router, prefix="/api/devices", tags=["Devices"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
 app.include_router(control.router, prefix="/api/control", tags=["Control"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
+app.include_router(recordings.router, prefix="/api/recordings", tags=["Recordings"])
 
 @app.get("/")
 async def root():
