@@ -72,10 +72,11 @@ class VideoStreamer:
             
             scrcpy_cmd.extend([
                 "--max-size", str(self.max_size),
-                "--bit-rate", str(self.bit_rate),
+                "--video-bit-rate", str(self.bit_rate),  # Use --video-bit-rate for scrcpy 3.3.4+
                 "--max-fps", str(self.max_fps),
                 "--record=-",  # Output to stdout
-                "--no-display",  # Don't show window
+                "--record-format=mkv",  # Required format for --record=- in scrcpy 3.3.4+
+                "--no-window",  # Disable window (implies --no-video-playback in scrcpy 3.3.4+)
                 "--no-control",  # Don't accept control
                 "--no-audio",  # No audio
                 "--encoder", "h264",  # Use H.264 encoder

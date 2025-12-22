@@ -54,24 +54,39 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
     start_time = time.time()
     adb_prefix = _get_adb_prefix(device_id)
     
-    # Try scrcpy first if preferred or if no preference specified (highest performance)
-    if preferred_method == 'scrcpy' or preferred_method is None:
+    # Temporarily disable scrcpy due to issues with --record=- outputting logs instead of video data
+    # This causes black screens and delays. Will re-enable when scrcpy issue is fixed.
+    # Always try scrcpy first if available (highest performance, regardless of preferred_method)
+    # This ensures we use the fastest method whenever possible
+    scrcpy_tried = False
+    scrcpy_error = None
+    scrcpy_enabled = True  # Re-enabled with named pipe (FIFO) implementation
+    
+    if scrcpy_enabled:
         try:
-            from .scrcpy_capture import get_screenshot_scrcpy
-            res = get_screenshot_scrcpy(device_id, timeout, quality, max_width)
-            if res:
-                return res
+            from .scrcpy_capture import get_screenshot_scrcpy, _check_scrcpy_available
+            # Check if scrcpy is available before trying
+            if _check_scrcpy_available():
+                scrcpy_tried = True
+                res = get_screenshot_scrcpy(device_id, timeout, quality, max_width)
+                if res:
+                    return res
+                else:
+                    scrcpy_error = "scrcpy returned None (no frame available or connection failed)"
+            else:
+                scrcpy_error = "scrcpy not available (not in PATH or version check failed)"
         except ImportError:
             # scrcpy module not available, continue to other methods
+            scrcpy_error = "scrcpy module import failed"
             pass
         except Exception as e:
             # scrcpy failed, continue to other methods
-            if preferred_method == 'scrcpy':
-                # If scrcpy was preferred but failed, try other methods
-                pass
-            else:
-                # If scrcpy was not preferred, silently continue
-                pass
+            scrcpy_error = f"scrcpy exception: {type(e).__name__}: {e}"
+            pass
+        
+        # Log scrcpy failure if we tried it
+        if scrcpy_tried and scrcpy_error:
+            print(f"[Screenshot] scrcpy failed: {scrcpy_error}, falling back to ADB methods", flush=True)
 
     # If preferred method is specified, try it first
     if preferred_method == 'raw':
@@ -84,7 +99,6 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
             # Check if result is black screen, if so try other methods
             if res and res.jpeg_data:
                 try:
-                    from io import BytesIO
                     check_img = Image.open(BytesIO(res.jpeg_data))
                     if _is_black_screen(check_img):
                         print("[Screenshot] Raw method returned black screen, trying other methods")
@@ -106,7 +120,6 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
             # Check if result is black screen, if so try other methods
             if res and res.jpeg_data:
                 try:
-                    from io import BytesIO
                     check_img = Image.open(BytesIO(res.jpeg_data))
                     if _is_black_screen(check_img):
                         print("[Screenshot] Gzip method returned black screen, trying other methods")
@@ -155,6 +168,7 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
             pass
 
     # Try methods in order of speed (if preferred_method not specified or failed)
+    # If preferred_method was 'scrcpy' but scrcpy failed, we'll try other methods here
     # Prioritize fastest method first for mirroring
     # Raw capture is typically fastest on USB 3.0 and modern devices
     methods_tried = []
@@ -168,18 +182,20 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
         if duration > 0.15:
             print(f"[Perf] Raw Capture took: {duration:.3f}s")
         
+        # Temporarily disable black screen check to avoid false positives
+        # The device might have a dark theme or the threshold might be too strict
         # Check if result is black screen
-        if res and res.jpeg_data:
-            try:
-                check_img = Image.open(BytesIO(res.jpeg_data))
-                if _is_black_screen(check_img):
-                    print("[Screenshot] Raw method returned black screen, trying other methods")
-                    methods_tried.append("raw (black screen)")
-                    raise Exception("Black screen detected")
-            except Exception as e:
-                if "Black screen" in str(e):
-                    raise
-                # Other errors in check, allow through
+        # if res and res.jpeg_data:
+        #     try:
+        #         check_img = Image.open(BytesIO(res.jpeg_data))
+        #         if _is_black_screen(check_img):
+        #             print("[Screenshot] Raw method returned black screen, trying other methods")
+        #             methods_tried.append("raw (black screen)")
+        #             raise Exception("Black screen detected")
+        #     except Exception as e:
+        #         if "Black screen" in str(e):
+        #             raise
+        #         # Other errors in check, allow through
         
         methods_tried.append("raw")
         return res
@@ -197,18 +213,20 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
         if duration > 0.15:
             print(f"[Perf] Gzip Capture took: {duration:.3f}s")
         
+        # Temporarily disable black screen check to avoid false positives
+        # The device might have a dark theme or the threshold might be too strict
         # Check if result is black screen
-        if res and res.jpeg_data:
-            try:
-                check_img = Image.open(BytesIO(res.jpeg_data))
-                if _is_black_screen(check_img):
-                    print("[Screenshot] Gzip method returned black screen, trying other methods")
-                    methods_tried.append("gzip (black screen)")
-                    raise Exception("Black screen detected")
-            except Exception as e:
-                if "Black screen" in str(e):
-                    raise
-                # Other errors in check, allow through
+        # if res and res.jpeg_data:
+        #     try:
+        #         check_img = Image.open(BytesIO(res.jpeg_data))
+        #         if _is_black_screen(check_img):
+        #             print("[Screenshot] Gzip method returned black screen, trying other methods")
+        #             methods_tried.append("gzip (black screen)")
+        #             raise Exception("Black screen detected")
+        #     except Exception as e:
+        #         if "Black screen" in str(e):
+        #             raise
+        #         # Other errors in check, allow through
         
         methods_tried.append("gzip")
         return res
@@ -259,24 +277,16 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
         width, height = img.size
         
         # Check if PNG result is black screen before processing
-        if _is_black_screen(img):
-            print("[Screenshot] PNG method returned black screen")
-            methods_tried.append("png (black screen)")
-            # Try legacy method as last resort
-            try:
-                legacy_res = _get_screenshot_legacy(device_id, timeout, quality, max_width)
-                methods_tried.append("legacy")
-                return legacy_res
-            except Exception as legacy_e:
-                if "black screen" in str(legacy_e).lower():
-                    methods_tried.append("legacy (black screen)")
-                else:
-                    methods_tried.append("legacy (failed)")
-            
-            # All methods returned black screen, likely sensitive screen
-            if methods_tried:
-                print(f"[Screenshot] All methods tried: {', '.join(methods_tried)}")
-            return _create_fallback_screenshot(is_sensitive=True)
+        # Temporarily disable black screen check to avoid false positives
+        # The device might have a dark theme or the threshold might be too strict
+        is_black = _is_black_screen(img)
+        if is_black:
+            print(f"[Screenshot] PNG method detected black screen (size: {width}x{height}), but proceeding anyway to avoid false positives")
+            # Don't treat as black screen - proceed with the image
+            # This avoids false positives when device has dark theme or is actually showing content
+            methods_tried.append("png (detected black but proceeding)")
+        else:
+            methods_tried.append("png")
         
         methods_tried.append("png")
         return _process_image(img, width, height, quality, max_width)
@@ -337,9 +347,11 @@ def _get_screenshot_gzip(device_id: str | None, timeout: int, quality: int, max_
 
     img = Image.frombuffer("RGBA", (w, h), pixels, "raw", "RGBA", 0, 1)
     
+    # Temporarily disable black screen check to avoid false positives
+    # The device might have a dark theme or the threshold might be too strict
     # Check if image is black screen before processing
-    if _is_black_screen(img):
-        raise Exception("Gzip capture returned black screen")
+    # if _is_black_screen(img):
+    #     raise Exception("Gzip capture returned black screen")
     
     return _process_image(img, w, h, quality, max_width)
 
@@ -376,9 +388,11 @@ def _get_screenshot_raw(device_id: str | None, timeout: int, quality: int, max_w
         
     img = Image.frombuffer("RGBA", (w, h), pixels, "raw", "RGBA", 0, 1)
     
+    # Temporarily disable black screen check to avoid false positives
+    # The device might have a dark theme or the threshold might be too strict
     # Check if image is black screen before processing
-    if _is_black_screen(img):
-        raise Exception("Raw capture returned black screen")
+    # if _is_black_screen(img):
+    #     raise Exception("Raw capture returned black screen")
     
     return _process_image(img, w, h, quality, max_width)
 

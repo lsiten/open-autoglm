@@ -289,6 +289,144 @@ check_adb() {
     fi
 }
 
+# 检查并安装 scrcpy
+check_scrcpy() {
+    if command -v scrcpy &> /dev/null; then
+        # scrcpy 已安装，检查版本
+        SCRCPY_VERSION=$(scrcpy --version 2>&1 | head -n 1 || echo "unknown")
+        echo -e "${GREEN}✓ scrcpy 已安装: $SCRCPY_VERSION${NC}"
+    else
+        # scrcpy 未安装，尝试自动安装
+        echo -e "${YELLOW}⚠ 未找到 scrcpy 工具，正在尝试自动安装...${NC}"
+        
+        # 检测操作系统类型
+        OS_TYPE="unknown"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            OS_TYPE="macos"
+        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            OS_TYPE="linux"
+        fi
+        
+        INSTALL_SUCCESS=false
+        
+        if [ "$OS_TYPE" = "macos" ]; then
+            # macOS: 使用 Homebrew 安装
+            if command -v brew &> /dev/null; then
+                echo -e "${BLUE}使用 Homebrew 安装 scrcpy...${NC}"
+                # 检查是否已安装
+                if brew list scrcpy &> /dev/null 2>&1; then
+                    echo -e "${GREEN}✓ scrcpy 已通过 Homebrew 安装${NC}"
+                    INSTALL_SUCCESS=true
+                else
+                    # 尝试安装
+                    echo -e "${BLUE}正在安装 scrcpy（这可能需要几分钟）...${NC}"
+                    if brew install scrcpy 2>&1 | grep -v "Updating Homebrew\|Already up-to-date\|Downloading\|Pouring\|==> Installing\|==> Pouring"; then
+                        # 安装命令执行完成，检查结果
+                        if command -v scrcpy &> /dev/null; then
+                            INSTALL_SUCCESS=true
+                            echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                        else
+                            # 尝试添加到 PATH
+                            BREW_PREFIX=$(brew --prefix 2>/dev/null)
+                            if [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/bin/scrcpy" ]; then
+                                export PATH="$PATH:$BREW_PREFIX/bin"
+                                if command -v scrcpy &> /dev/null; then
+                                    INSTALL_SUCCESS=true
+                                    echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                                else
+                                    echo -e "${YELLOW}⚠ 安装完成，但可能需要重新加载 PATH${NC}"
+                                    echo -e "${YELLOW}   请运行: export PATH=\$PATH:\$(brew --prefix)/bin${NC}"
+                                fi
+                            fi
+                        fi
+                    else
+                        # 检查是否安装成功（brew install 可能返回非零退出码但实际已安装）
+                        if command -v scrcpy &> /dev/null || brew list scrcpy &> /dev/null 2>&1; then
+                            INSTALL_SUCCESS=true
+                            echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                        else
+                            echo -e "${RED}错误: Homebrew 安装 scrcpy 失败${NC}"
+                            echo -e "${YELLOW}请手动安装: brew install scrcpy${NC}"
+                        fi
+                    fi
+                fi
+            else
+                echo -e "${RED}错误: 未找到 Homebrew${NC}"
+                echo -e "${YELLOW}请先安装 Homebrew:${NC}"
+                echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                echo -e "${YELLOW}或手动安装 scrcpy:${NC}"
+                echo "  下载地址: https://github.com/Genymobile/scrcpy/releases"
+            fi
+        elif [ "$OS_TYPE" = "linux" ]; then
+            # Linux: 检测包管理器并安装
+            if command -v apt-get &> /dev/null; then
+                # Debian/Ubuntu
+                echo -e "${BLUE}使用 apt 安装 scrcpy...${NC}"
+                if sudo apt-get update -qq && sudo apt-get install -y scrcpy 2>&1 | grep -v "already the newest\|0 upgraded"; then
+                    if command -v scrcpy &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                    fi
+                else
+                    # 检查是否已经安装
+                    if dpkg -l | grep -q scrcpy; then
+                        echo -e "${GREEN}✓ scrcpy 已安装${NC}"
+                        INSTALL_SUCCESS=true
+                    fi
+                fi
+            elif command -v yum &> /dev/null; then
+                # CentOS/RHEL (旧版本)
+                echo -e "${BLUE}使用 yum 安装 scrcpy...${NC}"
+                if sudo yum install -y scrcpy 2>&1 | grep -v "already installed\|Nothing to do"; then
+                    if command -v scrcpy &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                    fi
+                fi
+            elif command -v dnf &> /dev/null; then
+                # Fedora/CentOS/RHEL (新版本)
+                echo -e "${BLUE}使用 dnf 安装 scrcpy...${NC}"
+                if sudo dnf install -y scrcpy 2>&1 | grep -v "already installed\|Nothing to do"; then
+                    if command -v scrcpy &> /dev/null; then
+                        INSTALL_SUCCESS=true
+                        echo -e "${GREEN}✓ scrcpy 安装成功${NC}"
+                    fi
+                fi
+            else
+                echo -e "${RED}错误: 未找到支持的包管理器 (apt/yum/dnf)${NC}"
+                echo -e "${YELLOW}请手动安装 scrcpy:${NC}"
+                echo "  - Debian/Ubuntu: sudo apt-get install scrcpy"
+                echo "  - CentOS/RHEL: sudo yum install scrcpy"
+                echo "  - Fedora: sudo dnf install scrcpy"
+                echo "  - 或从源码编译: https://github.com/Genymobile/scrcpy"
+            fi
+        else
+            echo -e "${RED}错误: 无法自动检测操作系统类型${NC}"
+            echo -e "${YELLOW}请手动安装 scrcpy:${NC}"
+            echo "  - macOS: brew install scrcpy"
+            echo "  - Linux: sudo apt-get install scrcpy (或使用对应发行版的包管理器)"
+            echo "  - Windows: 下载地址: https://github.com/Genymobile/scrcpy/releases"
+        fi
+        
+        # 验证安装结果
+        if [ "$INSTALL_SUCCESS" = "true" ] || command -v scrcpy &> /dev/null; then
+            # 验证 scrcpy 是否可用
+            if scrcpy --version &> /dev/null; then
+                SCRCPY_VERSION=$(scrcpy --version 2>&1 | head -n 1 || echo "unknown")
+                echo -e "${GREEN}✓ scrcpy 工具已就绪: $SCRCPY_VERSION${NC}"
+            else
+                echo -e "${YELLOW}⚠ scrcpy 已安装，但可能需要重新加载 PATH 或重启终端${NC}"
+            fi
+        else
+            echo -e "${YELLOW}⚠ scrcpy 安装失败或需要手动安装（可选，不影响启动）${NC}"
+            echo -e "${YELLOW}   系统将使用 ADB 截图方法（性能略低）${NC}"
+            echo -e "${YELLOW}   如需使用 scrcpy 提升性能，请手动安装:${NC}"
+            echo -e "${YELLOW}   - macOS: brew install scrcpy${NC}"
+            echo -e "${YELLOW}   - Linux: sudo apt-get install scrcpy${NC}"
+        fi
+    fi
+}
+
 # 启动后端服务
 start_backend() {
     echo -e "\n${BLUE}启动后端服务...${NC}"
@@ -498,6 +636,7 @@ main() {
     check_node
     check_dependencies
     check_adb
+    check_scrcpy
     
     # 如果使用 HTTPS，检查证书
     if [ "$USE_HTTPS" = "true" ]; then

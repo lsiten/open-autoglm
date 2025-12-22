@@ -197,6 +197,9 @@
       :quality-options="qualityOptions"
       :use-mjpeg-stream="useMjpegStream"
       :mjpeg-stream-url="mjpegStreamUrl"
+      :use-video-stream="useVideoStream"
+      :video-stream-url="videoStreamUrl"
+      :video-element="videoElement"
       @update-quality="updateStreamQuality"
       @mouse-down="handleMouseDown"
       @mouse-move="handleMouseMove"
@@ -205,6 +208,8 @@
       @go-back="goBack"
       @go-recent="goRecent"
       @mjpeg-error="useMjpegStream = false"
+      @video-element-ready="onVideoElementReady"
+      @video-error="onVideoError"
       @landscape-update="isLandscape = $event"
     />
 
@@ -425,7 +430,11 @@ const {
   clickEffects,
   useMjpegStream,
   mjpegStreamUrl,
+  useVideoStream,
+  videoStreamUrl,
+  videoElement,
   startStreamLoop: startStreamLoopComposable,
+  stopStreamLoop: stopStreamLoopComposable,
   forceRefreshFrame,
   handleMouseDown,
   handleMouseMove,
@@ -434,6 +443,46 @@ const {
   goBack,
   goRecent
 } = useScreenStream(apiBaseUrl, activeDeviceId)
+
+// Video element ref for video streaming
+const videoElementRef = ref<HTMLVideoElement | null>(null)
+
+// Watch for video element ref and set it in composable
+watch(videoElementRef, (newVal) => {
+  if (newVal && videoElement.value === null) {
+    // Set video element in composable when ref is ready
+    // The composable will use this element for MSE streaming
+    ;(videoElement as any).value = newVal
+  }
+}, { immediate: true })
+
+// Handle video element ready event from ScreenMirror
+const onVideoElementReady = (element: HTMLVideoElement) => {
+  videoElementRef.value = element
+  if (videoElement.value === null) {
+    ;(videoElement as any).value = element
+  }
+  
+  // If device is selected but streaming hasn't started, start it now
+  if (activeDeviceId.value && !isStreaming.value) {
+    nextTick(() => {
+      startStreamLoopComposable()
+    })
+  }
+}
+
+// Handle video stream error - disable video stream and restart with fallback methods
+const onVideoError = () => {
+  console.warn('[Dashboard] Video stream error, disabling video stream and restarting with fallback methods')
+  useVideoStream.value = false
+  // Restart stream loop to try other methods
+  if (activeDeviceId.value && isStreaming.value) {
+    stopStreamLoopComposable()
+    nextTick(() => {
+      startStreamLoopComposable()
+    })
+  }
+}
 
 const { 
   handleLog, 

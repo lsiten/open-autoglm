@@ -16,6 +16,9 @@ export function useScreenStream(
   const clickEffects = ref<Array<{ id: number; x: number; y: number }>>([])
   const useMjpegStream = ref(true)  // Use MJPEG stream for smoother updates
   const mjpegStreamUrl = ref('')
+  const useVideoStream = ref(true)  // Use H.264 video stream (MSE) for best performance
+  const videoStreamUrl = ref('')
+  const videoElement = ref<HTMLVideoElement | null>(null)
   
   let frameCount = 0
   let lastFpsTime = Date.now()
@@ -31,6 +34,13 @@ export function useScreenStream(
   const MAX_RECONNECT_ATTEMPTS = 5
   let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
   let usingWebSocket = false // Flag to track if we're using WebSocket
+  
+  // Video stream (MSE) state
+  let mediaSource: MediaSource | null = null
+  let sourceBuffer: SourceBuffer | null = null
+  let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  let videoAbortController: AbortController | null = null
+  let usingVideoStream = false // Flag to track if we're using video stream
   
   // Performance monitoring
   let requestStartTime = 0
@@ -344,6 +354,219 @@ export function useScreenStream(
     wsReconnectAttempts = 0
   }
 
+  /**
+   * Start H.264 video stream using MSE (MediaSource Extensions) API.
+   * This is the highest priority streaming method for best performance.
+   */
+  const startVideoStream = async (videoEl: HTMLVideoElement): Promise<boolean> => {
+    if (!activeDeviceId.value) {
+      console.warn('[useScreenStream] No device selected, cannot start video stream')
+      return false
+    }
+
+    try {
+      videoElement.value = videoEl
+      
+      // Check if MediaSource is supported
+      if (!('MediaSource' in window)) {
+        console.warn('[useScreenStream] MediaSource API not supported, falling back to other methods')
+        return false
+      }
+
+      // Create MediaSource
+      mediaSource = new MediaSource()
+      const url = URL.createObjectURL(mediaSource)
+      videoEl.src = url
+
+      // Wait for MediaSource to be ready
+      await new Promise<void>((resolve, reject) => {
+        mediaSource!.addEventListener('sourceopen', () => {
+          try {
+            // Add MP4 source buffer for fragmented MP4
+            const codecOptions = [
+              'video/mp4; codecs="avc1.42E01E"',  // Baseline profile, level 3.0
+              'video/mp4; codecs="avc1.640028"',  // High profile, level 4.0
+              'video/mp4; codecs="avc1.4D001E"',  // Main profile, level 3.0
+              'video/mp4; codecs="avc1.64001E"',  // High profile, level 3.0
+              'video/mp4'  // Fallback
+            ]
+            
+            let supported = false
+            for (const mimeType of codecOptions) {
+              if (MediaSource.isTypeSupported(mimeType)) {
+                sourceBuffer = mediaSource!.addSourceBuffer(mimeType)
+                supported = true
+                break
+              }
+            }
+            
+            if (!supported) {
+              reject(new Error('MP4/H.264 codec not supported'))
+              return
+            }
+
+            sourceBuffer!.mode = 'sequence'
+            resolve()
+          } catch (e) {
+            reject(e)
+          }
+        }, { once: true })
+
+        mediaSource!.addEventListener('error', () => {
+          reject(new Error('MediaSource error'))
+        }, { once: true })
+      })
+
+      // Start fetching H.264 stream
+      await fetchVideoStream()
+      
+      usingVideoStream = true
+      videoStreamUrl.value = `${apiBaseUrl}/control/stream/video`
+      console.log('[useScreenStream] ✅ Video stream (MSE) started successfully')
+      return true
+    } catch (e: any) {
+      console.warn(`[useScreenStream] Video stream failed: ${e.message || e}`, e)
+      stopVideoStream()
+      // Disable video stream to allow fallback to other methods
+      useVideoStream.value = false
+      return false
+    }
+  }
+
+  /**
+   * Fetch H.264 video stream and append to source buffer.
+   */
+  const fetchVideoStream = async () => {
+    if (!sourceBuffer || !activeDeviceId.value) {
+      return
+    }
+
+    videoAbortController = new AbortController()
+    const streamUrl = `${apiBaseUrl}/control/stream/video`
+
+    try {
+      const response = await fetch(streamUrl, {
+        signal: videoAbortController.signal,
+        headers: {
+          'Accept': 'video/mp4'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null')
+      }
+
+      streamReader = response.body.getReader()
+
+      // Process stream chunks
+      while (true) {
+        const { done, value } = await streamReader.read()
+        
+        if (done) {
+          // Stream ended, this might be an error
+          console.warn('[useScreenStream] Video stream ended unexpectedly')
+          break
+        }
+
+        // Wait for source buffer to be ready
+        if (sourceBuffer.updating) {
+          await new Promise(resolve => {
+            sourceBuffer!.addEventListener('updateend', resolve, { once: true })
+          })
+        }
+
+        // Append MP4 fragment data to source buffer
+        try {
+          if (!sourceBuffer.updating) {
+            sourceBuffer.appendBuffer(value)
+          } else {
+            await new Promise(resolve => {
+              sourceBuffer!.addEventListener('updateend', resolve, { once: true })
+            })
+            sourceBuffer.appendBuffer(value)
+          }
+        } catch (e: any) {
+          if (e.name === 'QuotaExceededError') {
+            // Buffer is full, remove old data
+            if (sourceBuffer.buffered.length > 0) {
+              try {
+                sourceBuffer.remove(0, sourceBuffer.buffered.start(1) || sourceBuffer.buffered.end(0))
+              } catch {
+                // Ignore remove errors
+              }
+            }
+            await new Promise(resolve => setTimeout(resolve, 100))
+            continue
+          }
+          throw e
+        }
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        // Stream was aborted, this is normal
+        return
+      }
+      // Re-throw to be handled by startVideoStream
+      throw e
+    }
+  }
+
+  /**
+   * Stop video streaming and cleanup resources.
+   */
+  const stopVideoStream = () => {
+    usingVideoStream = false
+    videoStreamUrl.value = ''
+
+    // Abort fetch if in progress
+    if (videoAbortController) {
+      videoAbortController.abort()
+      videoAbortController = null
+    }
+
+    // Close stream reader
+    if (streamReader) {
+      streamReader.cancel().catch(() => {})
+      streamReader = null
+    }
+
+    // Clean up source buffer
+    if (sourceBuffer) {
+      try {
+        if (sourceBuffer.updating) {
+          sourceBuffer.abort()
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+      sourceBuffer = null
+    }
+
+    // Clean up MediaSource
+    if (mediaSource) {
+      try {
+        if (mediaSource.readyState === 'open') {
+          mediaSource.endOfStream()
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+      
+      if (videoElement.value && videoElement.value.src) {
+        URL.revokeObjectURL(videoElement.value.src)
+        videoElement.value.src = ''
+      }
+      
+      mediaSource = null
+    }
+
+    videoElement.value = null
+  }
+
   const startStreamLoop = async () => {
     // Don't start multiple loops
     if (isStreaming.value) {
@@ -357,27 +580,56 @@ export function useScreenStream(
     lastFpsTime = Date.now()
     fps.value = 0
     
-    // Try WebSocket first (reduces log noise)
-    if (activeDeviceId.value) {
-      const wsConnected = await connectWebSocket()
-      
-      // If WebSocket is connected, we're done - no HTTP polling needed
-      if (wsConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-        console.log('[useScreenStream] Using WebSocket for frame streaming (no HTTP polling)')
-        return // Exit early, don't start HTTP polling
-      }
-      
-      // If WebSocket failed, continue to fallback options
-      console.warn('[useScreenStream] WebSocket connection failed, trying fallback methods')
+    if (!activeDeviceId.value) {
+      console.warn('[useScreenStream] No device selected, cannot start streaming')
+      isStreaming.value = false
+      return
     }
     
-    // Try MJPEG stream if WebSocket failed and MJPEG is enabled
-    if (useMjpegStream.value && activeDeviceId.value) {
+    // Priority 1: Try H.264 video stream (MSE) first (best performance, lowest latency, continuous stream)
+    // This uses scrcpy's H.264 video stream for optimal performance
+    // Note: videoElement should be set by the component before calling startStreamLoop
+    if (useVideoStream.value) {
+      if (!videoElement.value) {
+        console.warn('[useScreenStream] Video element not ready, will try after component mounts')
+        // Wait a bit for video element to be ready (component might not be mounted yet)
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      if (videoElement.value) {
+        console.log('[useScreenStream] Attempting H.264 video stream (MSE) (priority 1: best performance)')
+        const videoStarted = await startVideoStream(videoElement.value)
+        if (videoStarted) {
+          console.log('[useScreenStream] ✅ Using H.264 video stream (MSE) (best performance, continuous stream)')
+          return // Exit early, video stream is active
+        }
+        // Video stream failed, disable it and continue to fallback methods
+        console.warn('[useScreenStream] Video stream failed, disabling and trying fallback methods')
+        useVideoStream.value = false
+        // Continue to try other methods below
+      } else {
+        console.warn('[useScreenStream] Video element still not ready, skipping video stream')
+        // Disable video stream if element is not ready
+        useVideoStream.value = false
+      }
+    }
+    
+    // Priority 2: Try WebSocket (good performance, low latency, but frame-by-frame)
+    console.log('[useScreenStream] Attempting WebSocket connection (priority 2: good performance)')
+    const wsConnected = await connectWebSocket()
+    
+    // If WebSocket is connected, we're done - no HTTP polling needed
+    if (wsConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      console.log('[useScreenStream] ✅ Using WebSocket for frame streaming (good performance, no HTTP polling)')
+      return // Exit early, don't start HTTP polling
+    }
+    
+    // Priority 3: Try MJPEG stream if WebSocket failed (good performance, continuous stream)
+    if (useMjpegStream.value) {
+      console.log('[useScreenStream] WebSocket failed, trying MJPEG stream (priority 3: good performance)')
       mjpegStreamUrl.value = `${apiBaseUrl}/control/stream/mjpeg`
       // MJPEG stream will be handled by img tag directly
-      // Start FPS monitoring for MJPEG stream based on image load events
-      let mjpegFrameCount = 0
-      let mjpegLastFpsTime = Date.now()
+      let mjpegStartTime = Date.now()
       
       // Monitor MJPEG stream by checking if URL is accessible
       // If MJPEG fails, fallback to HTTP polling
@@ -387,24 +639,27 @@ export function useScreenStream(
           return
         }
         // If MJPEG URL is set but no image loaded after 3 seconds, fallback
-        if (mjpegStreamUrl.value && !latestScreenshot.value) {
-          const timeSinceStart = Date.now() - mjpegLastFpsTime
-          if (timeSinceStart > 3000) {
-            console.warn('[useScreenStream] MJPEG stream not loading, falling back to HTTP polling')
-            useMjpegStream.value = false
-            mjpegStreamUrl.value = ''
-            clearInterval(checkMjpegHealth)
-            // Start HTTP polling fallback
-            if (activeRequests === 0) {
-              tryFetchFrame()
-            }
+        const timeSinceStart = Date.now() - mjpegStartTime
+        if (mjpegStreamUrl.value && !latestScreenshot.value && timeSinceStart > 3000) {
+          console.warn('[useScreenStream] MJPEG stream not loading after 3s, falling back to HTTP polling')
+          useMjpegStream.value = false
+          mjpegStreamUrl.value = ''
+          clearInterval(checkMjpegHealth)
+          // Start HTTP polling fallback
+          if (activeRequests === 0) {
+            tryFetchFrame()
           }
+        } else if (latestScreenshot.value) {
+          // MJPEG is working, clear the health check
+          clearInterval(checkMjpegHealth)
+          console.log('[useScreenStream] ✅ Using MJPEG stream (good performance)')
         }
       }, 1000)
       return
     }
     
-    // Fallback to HTTP polling
+    // Priority 4: Fallback to HTTP polling (lowest performance, highest latency)
+    console.warn('[useScreenStream] Video stream, WebSocket and MJPEG failed, falling back to HTTP polling (priority 4: lowest performance)')
     // Start initial frame fetch immediately
     if (activeRequests === 0) {
       tryFetchFrame()
@@ -561,6 +816,7 @@ export function useScreenStream(
 
   const stopStreamLoop = () => {
     isStreaming.value = false
+    stopVideoStream()
     disconnectWebSocket()
     if (fetchController) {
       fetchController.abort()
@@ -578,6 +834,9 @@ export function useScreenStream(
     clickEffects,
     useMjpegStream,
     mjpegStreamUrl,
+    useVideoStream,
+    videoStreamUrl,
+    videoElement,
     startStreamLoop,
     stopStreamLoop,
     forceRefreshFrame,

@@ -33,8 +33,19 @@
              @mousemove="$emit('mouse-move', $event)"
              @mouseup="$emit('mouse-up', $event)"
              @mouseleave="$emit('mouse-up', $event)">
-          <!-- MJPEG Stream (if enabled) -->
-          <img v-if="useMjpegStream && mjpegStreamUrl" 
+          <!-- H.264 Video Stream (MSE) - Highest Priority -->
+          <video v-if="useVideoStream" 
+                ref="videoRef"
+                autoplay
+                playsinline
+                muted
+                class="w-full h-full object-fill pointer-events-none select-none"
+                @loadedmetadata="onVideoLoaded"
+                @error="onVideoError"
+                style="display: block;" />
+          
+          <!-- MJPEG Stream (if enabled and video not available) -->
+          <img v-else-if="useMjpegStream && mjpegStreamUrl" 
                ref="mjpegImgRef"
                :src="mjpegStreamUrl" 
                class="w-full h-full object-fill pointer-events-none select-none" 
@@ -104,6 +115,9 @@ const props = defineProps<{
   qualityOptions: Array<{ key: string }>
   useMjpegStream?: boolean
   mjpegStreamUrl?: string
+  useVideoStream?: boolean
+  videoStreamUrl?: string
+  videoElement?: HTMLVideoElement | null
 }>()
 
 const emit = defineEmits<{
@@ -115,11 +129,49 @@ const emit = defineEmits<{
   'go-back': []
   'go-recent': []
   'mjpeg-error': []
+  'video-error': []
+  'video-element-ready': [element: HTMLVideoElement]
   'landscape-update': [isLandscape: boolean]
 }>()
 
 const mjpegImgRef = ref<HTMLImageElement | null>(null)
+const videoRef = ref<HTMLVideoElement | null>(null)
 let mjpegCheckInterval: number | null = null
+
+// Expose video ref to parent for composable when mounted
+onMounted(() => {
+  if (videoRef.value) {
+    // Emit video element to parent so composable can use it
+    emit('video-element-ready', videoRef.value)
+  }
+})
+
+// Watch for videoElement prop - if it's set externally, use it
+watch(() => props.videoElement, (newVal) => {
+  if (newVal && videoRef.value && videoRef.value !== newVal) {
+    // If videoElement is provided externally, we should use it
+    // But since we're using template ref, we'll emit our ref instead
+  }
+}, { immediate: true })
+
+const onVideoLoaded = (event: Event) => {
+  const video = event.target as HTMLVideoElement
+  if (video.videoWidth > 0 && video.videoHeight > 0) {
+    const newIsLandscape = video.videoWidth > video.videoHeight
+    emit('landscape-update', newIsLandscape)
+  }
+}
+
+const onVideoError = (event: Event) => {
+  const video = event.target as HTMLVideoElement
+  const error = video.error
+  if (error) {
+    console.warn(`[ScreenMirror] Video stream error (code ${error.code}): ${error.message || 'Unknown error'}`)
+  } else {
+    console.warn('[ScreenMirror] Video stream error, falling back to other methods')
+  }
+  emit('video-error')
+}
 
 const checkMjpegOrientation = () => {
   if (mjpegImgRef.value && mjpegImgRef.value.complete) {

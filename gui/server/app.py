@@ -4,6 +4,24 @@ from .routers import devices, system, agent, control, tasks, recordings
 
 app = FastAPI(title="Open-AutoGLM GUI", version="1.0.0")
 
+@app.on_event("startup")
+async def startup_event():
+    """Clean up any leftover scrcpy connections on startup."""
+    try:
+        from phone_agent.adb.scrcpy_capture import cleanup_all_scrcpy
+        cleanup_all_scrcpy()
+    except Exception as e:
+        print(f"[App] Error cleaning up scrcpy on startup: {e}", flush=True)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up scrcpy connections on shutdown."""
+    try:
+        from phone_agent.adb.scrcpy_capture import cleanup_all_scrcpy
+        cleanup_all_scrcpy()
+    except Exception as e:
+        print(f"[App] Error cleaning up scrcpy on shutdown: {e}", flush=True)
+
 # Allow CORS for frontend
 app.add_middleware(
     CORSMiddleware,

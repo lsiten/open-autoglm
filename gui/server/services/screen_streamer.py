@@ -122,6 +122,9 @@ class ScreenStreamer:
             # Too short timeout causes frequent failures and black screens
             # Use preferred method if available for better performance
             preferred_method = self._get_preferred_method()
+            if not hasattr(self, '_first_capture_logged'):
+                print(f"[ScreenStreamer] Starting capture with preferred_method={preferred_method}", flush=True)
+                self._first_capture_logged = True
             method_start = time.time()
             screenshot = factory.get_screenshot(
                 device_id, 
@@ -131,6 +134,12 @@ class ScreenStreamer:
                 preferred_method=preferred_method
             )
             method_duration = time.time() - method_start
+            if not hasattr(self, '_first_screenshot_logged'):
+                if screenshot and screenshot.jpeg_data:
+                    print(f"[ScreenStreamer] First screenshot captured successfully: {len(screenshot.jpeg_data)} bytes, method={preferred_method}, duration={method_duration:.3f}s", flush=True)
+                else:
+                    print(f"[ScreenStreamer] First screenshot failed: screenshot={screenshot}, method={preferred_method}, duration={method_duration:.3f}s", flush=True)
+                self._first_screenshot_logged = True
             
             # Record method performance (only if we successfully got screenshot)
             if screenshot and screenshot.jpeg_data:
@@ -241,7 +250,23 @@ class ScreenStreamer:
                 # print(f"[ScreenStreamer] Fastest method changed to: {fastest_method} (avg: {method_avg_times[fastest_method]:.3f}s)", flush=True)
     
     def _get_preferred_method(self) -> Optional[str]:
-        """Get the preferred screenshot method based on performance history."""
+        """Get the preferred screenshot method based on performance history.
+        scrcpy re-enabled with fixed parameters for scrcpy 3.3.4+.
+        """
+        # scrcpy re-enabled with named pipe (FIFO) implementation
+        scrcpy_enabled = True
+        
+        if scrcpy_enabled:
+            # First, check if scrcpy is available (highest priority)
+            try:
+                from phone_agent.adb.scrcpy_capture import _check_scrcpy_available
+                if _check_scrcpy_available():
+                    return 'scrcpy'
+            except (ImportError, Exception):
+                # scrcpy not available or check failed, continue to other methods
+                pass
+        
+        # If scrcpy is not available or disabled, use the fastest method from history
         return self._fastest_method
     
     def _get_actual_fps(self) -> float:
@@ -332,6 +357,13 @@ class ScreenStreamer:
                 
                 # Capture frame synchronously
                 frame, status = self._capture_frame_sync(device_id)
+                
+                # Log first few captures for debugging
+                if not hasattr(self, '_capture_count'):
+                    self._capture_count = 0
+                self._capture_count += 1
+                if self._capture_count <= 3:
+                    print(f"[ScreenStreamer] Capture #{self._capture_count}: status={status}, frame={'present' if frame else 'none'}", flush=True)
                 
                 # Log performance periodically
                 self._log_performance()

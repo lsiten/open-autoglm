@@ -13,6 +13,8 @@ import threading
 import time
 import queue
 import os
+import select
+import sys
 from typing import Optional
 from dataclasses import dataclass
 from io import BytesIO
@@ -33,6 +35,7 @@ class ScrcpyConnection:
     max_size: int = 720
     bit_rate: int = 2000000  # 2Mbps
     max_fps: int = 60
+    fifo_path: Optional[str] = None  # Path to named pipe (FIFO)
     
     def __post_init__(self):
         if self.frame_queue is None:
@@ -41,6 +44,10 @@ class ScrcpyConnection:
 
 _scrcpy_connections: dict[str, ScrcpyConnection] = {}
 _connection_lock = threading.Lock()
+
+# Cache for scrcpy availability check to avoid repeated warnings
+_scrcpy_available_cache: Optional[bool] = None
+_scrcpy_warning_printed = False
 
 
 def _get_adb_prefix(device_id: str | None) -> list:
@@ -51,55 +58,136 @@ def _get_adb_prefix(device_id: str | None) -> list:
 
 
 def _check_scrcpy_available() -> bool:
-    """Check if scrcpy is available in PATH."""
+    """Check if scrcpy is available in PATH.
+    
+    Uses caching to avoid repeated warnings when scrcpy is not available.
+    If scrcpy is available, always re-checks (in case it gets uninstalled).
+    """
+    global _scrcpy_available_cache, _scrcpy_warning_printed
+    
+    # If cached as unavailable, return immediately without re-checking or printing
+    if _scrcpy_available_cache is False:
+        return False
+    
     try:
         result = subprocess.run(
             ["scrcpy", "--version"],
             capture_output=True,
             timeout=2
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        if result.returncode != 0:
+            stderr = result.stderr.decode('utf-8', errors='ignore') if result.stderr else ""
+            stdout = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ""
+            if not _scrcpy_warning_printed:
+                print(f"[Scrcpy] Version check failed (code {result.returncode}): stderr={stderr}, stdout={stdout}", flush=True)
+                _scrcpy_warning_printed = True
+            _scrcpy_available_cache = False
+            return False
+        # scrcpy is available, don't cache (always re-check in case it gets uninstalled)
+        return True
+    except FileNotFoundError:
+        if not _scrcpy_warning_printed:
+            print("[Scrcpy] scrcpy not found in PATH. Please install scrcpy: https://github.com/Genymobile/scrcpy", flush=True)
+            _scrcpy_warning_printed = True
+        _scrcpy_available_cache = False
+        return False
+    except subprocess.TimeoutExpired:
+        if not _scrcpy_warning_printed:
+            print("[Scrcpy] Version check timeout (scrcpy may be slow to respond)", flush=True)
+            _scrcpy_warning_printed = True
+        _scrcpy_available_cache = False
+        return False
+    except Exception as e:
+        if not _scrcpy_warning_printed:
+            print(f"[Scrcpy] Version check error: {e}", flush=True)
+            _scrcpy_warning_printed = True
+        _scrcpy_available_cache = False
         return False
 
 
-def _read_png_from_stream(stream) -> Optional[Image.Image]:
-    """Read a PNG image from stream."""
+def _read_png_from_stream(stream, timeout=0.5) -> Optional[Image.Image]:
+    """Read a PNG image from stream using PIL's built-in PNG reader.
+    
+    PIL's Image.open can read PNG from a stream, but it needs the stream to be seekable
+    or we need to read the complete PNG into memory first.
+    """
     try:
+        # First, check if data is available
+        if sys.platform != 'win32':
+            try:
+                fd = stream.fileno()
+                ready, _, _ = select.select([fd], [], [], timeout)
+                if not ready:
+                    return None  # No data available
+            except (ValueError, OSError):
+                # If select fails, try reading anyway
+                pass
+        
         # PNG signature: 89 50 4E 47 0D 0A 1A 0A
         signature = b'\x89PNG\r\n\x1a\n'
         
-        # Find PNG signature
-        buffer = b''
-        while len(buffer) < len(signature):
-            chunk = stream.read(1)
-            if not chunk:
-                return None
-            buffer += chunk
+        # Read first 8 bytes to check signature
+        header = stream.read(8)
+        if not header or len(header) < 8:
+            return None
         
         # Check if we have PNG signature
-        if buffer != signature:
+        if header != signature:
             # Try to find signature in buffer
-            while True:
+            buffer = header
+            # Read more data to find signature (up to 64KB)
+            for _ in range(64):  # Try up to 64KB in 1KB chunks
+                if sys.platform != 'win32':
+                    try:
+                        fd = stream.fileno()
+                        if not select.select([fd], [], [], 0.1)[0]:
+                            break
+                    except (ValueError, OSError):
+                        pass
+                more = stream.read(1024)
+                if not more:
+                    break
+                buffer += more
                 pos = buffer.find(signature)
                 if pos >= 0:
                     buffer = buffer[pos:]
                     break
-                # Read more data
-                chunk = stream.read(1024)
-                if not chunk:
+                if len(buffer) > 65536:  # Max 64KB
                     return None
-                buffer += chunk
-                if len(buffer) > 65536:  # Max PNG size check
-                    return None
+            else:
+                # Signature not found - log first few bytes for debugging
+                if not hasattr(_read_png_from_stream, '_logged_no_signature'):
+                    print(f"[Scrcpy] _read_png_from_stream: No PNG signature found, first 64 bytes (hex): {buffer[:64].hex()}", flush=True)
+                    print(f"[Scrcpy] _read_png_from_stream: First 64 bytes (ascii): {buffer[:64]!r}", flush=True)
+                    _read_png_from_stream._logged_no_signature = True
+                return None
+        else:
+            buffer = header
         
-        # Read PNG data
-        # PNG structure: signature + chunks
-        # We'll read until IEND chunk
+        # Now read PNG data chunk by chunk until IEND
         png_data = buffer
         iend_found = False
+        max_size = 10 * 1024 * 1024  # Max 10MB PNG (safety limit)
+        read_attempts = 0
+        max_read_attempts = 1000  # Safety limit for chunk reading
         
-        while not iend_found:
+        while not iend_found and len(png_data) < max_size and read_attempts < max_read_attempts:
+            read_attempts += 1
+            
+            # Check if data is available before reading chunk header
+            if sys.platform != 'win32':
+                try:
+                    fd = stream.fileno()
+                    ready, _, _ = select.select([fd], [], [], timeout)
+                    if not ready:
+                        # No data available, but we've started reading a PNG, so wait a bit
+                        if read_attempts > 10:  # After 10 attempts, give up
+                            return None
+                        time.sleep(0.01)
+                        continue
+                except (ValueError, OSError):
+                    pass
+            
             # Read chunk header (8 bytes: length + type)
             chunk_header = stream.read(8)
             if len(chunk_header) < 8:
@@ -108,12 +196,38 @@ def _read_png_from_stream(stream) -> Optional[Image.Image]:
             chunk_length = int.from_bytes(chunk_header[:4], 'big')
             chunk_type = chunk_header[4:8]
             
-            # Read chunk data
-            chunk_data = stream.read(chunk_length)
-            if len(chunk_data) < chunk_length:
+            # Safety check: chunk length should be reasonable
+            if chunk_length > 10 * 1024 * 1024:  # Max 10MB per chunk
+                print(f"[Scrcpy] _read_png_from_stream: Suspicious chunk length: {chunk_length}", flush=True)
                 return None
             
+            # Read chunk data (may need multiple reads for large chunks)
+            chunk_data = b''
+            while len(chunk_data) < chunk_length:
+                if sys.platform != 'win32':
+                    try:
+                        fd = stream.fileno()
+                        ready, _, _ = select.select([fd], [], [], timeout)
+                        if not ready:
+                            return None
+                    except (ValueError, OSError):
+                        pass
+                remaining = chunk_length - len(chunk_data)
+                data = stream.read(remaining)
+                if not data:
+                    return None
+                chunk_data += data
+            
             # Read CRC (4 bytes)
+            if sys.platform != 'win32':
+                try:
+                    fd = stream.fileno()
+                    ready, _, _ = select.select([fd], [], [], timeout)
+                    if not ready:
+                        return None
+                except (ValueError, OSError):
+                    pass
+            
             crc = stream.read(4)
             if len(crc) < 4:
                 return None
@@ -123,10 +237,24 @@ def _read_png_from_stream(stream) -> Optional[Image.Image]:
             if chunk_type == b'IEND':
                 iend_found = True
         
-        # Decode PNG
-        img = Image.open(BytesIO(png_data))
-        return img
+        if not iend_found:
+            if read_attempts >= max_read_attempts:
+                print(f"[Scrcpy] _read_png_from_stream: Max read attempts reached, PNG incomplete", flush=True)
+            return None  # PNG incomplete
+        
+        # Decode PNG using PIL
+        try:
+            img = Image.open(BytesIO(png_data))
+            img.load()  # Force loading to verify it's valid
+            return img
+        except Exception as e:
+            print(f"[Scrcpy] _read_png_from_stream: Failed to decode PNG: {type(e).__name__}: {e}", flush=True)
+            return None
     except Exception as e:
+        # Log error for debugging
+        import traceback
+        print(f"[Scrcpy] _read_png_from_stream error: {type(e).__name__}: {e}", flush=True)
+        print(f"[Scrcpy] _read_png_from_stream traceback: {traceback.format_exc()}", flush=True)
         return None
 
 
@@ -134,13 +262,23 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
     """Background thread to read frames from scrcpy via ffmpeg."""
     try:
         if not conn.ffmpeg_process or not conn.ffmpeg_process.stdout:
+            print(f"[Scrcpy] Frame reader: ffmpeg process or stdout not available", flush=True)
             return
+        
+        print(f"[Scrcpy] Frame reader: Started, waiting for frames from ffmpeg...", flush=True)
+        frame_count = 0
+        error_count = 0
+        last_error_time = 0
+        no_data_count = 0
         
         while conn.running:
             try:
                 # Read PNG frame from ffmpeg output
-                img = _read_png_from_stream(conn.ffmpeg_process.stdout)
+                img = _read_png_from_stream(conn.ffmpeg_process.stdout, timeout=0.5)
                 if img:
+                    frame_count += 1
+                    error_count = 0  # Reset error count on success
+                    
                     # Put frame in queue (drop old frames if queue is full)
                     try:
                         conn.frame_queue.put_nowait(img)
@@ -151,26 +289,102 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
                         except queue.Empty:
                             pass
                         conn.frame_queue.put_nowait(img)
+                    
+                    # Log first few frames for debugging
+                    if frame_count <= 3:
+                        print(f"[Scrcpy] Frame reader: Successfully read frame {frame_count}", flush=True)
+                    no_data_count = 0  # Reset no data counter on success
                 else:
-                    # No frame available, check if process is still running
+                    # No frame available
+                    no_data_count += 1
+                    # Log periodically if no frames after a while
+                    if no_data_count == 1:
+                        print(f"[Scrcpy] Frame reader: No frame available (attempt {no_data_count}), waiting...", flush=True)
+                    elif no_data_count % 20 == 0:  # Log every 20 attempts (~10 seconds with 0.5s timeout)
+                        print(f"[Scrcpy] Frame reader: Still no frame after {no_data_count} attempts (~{no_data_count * 0.5:.1f}s)", flush=True)
+                    
+                    # Check if process is still running
                     if conn.ffmpeg_process.poll() is not None:
                         # Process exited
+                        exit_code = conn.ffmpeg_process.returncode
+                        stderr = ""
+                        try:
+                            if conn.ffmpeg_process.stderr:
+                                stderr = conn.ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                        except:
+                            pass
+                        print(f"[Scrcpy] Frame reader: ffmpeg process exited (code {exit_code})", flush=True)
+                        if stderr:
+                            print(f"[Scrcpy] Frame reader: ffmpeg stderr: {stderr}", flush=True)
                         break
-                    time.sleep(0.001)  # Small delay to avoid busy waiting
+                    
+                    # Check if ffmpeg is actually receiving data from scrcpy
+                    # Log periodically if no frames after a while (for debugging)
+                    if frame_count == 0 and error_count == 0:
+                        # First time waiting, log after 2 seconds
+                        if time.time() - (getattr(conn, '_reader_start_time', time.time())) > 2.0:
+                            if not hasattr(conn, '_logged_waiting'):
+                                print(f"[Scrcpy] Frame reader: Still waiting for first frame (scrcpy may need more time to start streaming)", flush=True)
+                                # Check if scrcpy process is still running
+                                if conn.process:
+                                    scrcpy_status = "running" if conn.process.poll() is None else f"exited (code {conn.process.returncode})"
+                                    print(f"[Scrcpy] Frame reader: scrcpy process status: {scrcpy_status}", flush=True)
+                                # Check if ffmpeg process is still running
+                                if conn.ffmpeg_process:
+                                    ffmpeg_status = "running" if conn.ffmpeg_process.poll() is None else f"exited (code {conn.ffmpeg_process.returncode})"
+                                    print(f"[Scrcpy] Frame reader: ffmpeg process status: {ffmpeg_status}", flush=True)
+                                conn._logged_waiting = True
+                    
+                    time.sleep(0.05)  # 50ms delay to reduce CPU usage and give data time to arrive
             except Exception as e:
-                print(f"[Scrcpy] Error reading frame: {e}", flush=True)
+                error_count += 1
+                current_time = time.time()
+                # Only log errors occasionally to avoid spam
+                if current_time - last_error_time > 5.0 or error_count == 1:
+                    print(f"[Scrcpy] Frame reader: Error reading frame (count: {error_count}): {type(e).__name__}: {e}", flush=True)
+                    last_error_time = current_time
+                
+                # If too many errors, stop trying
+                if error_count > 100:
+                    print(f"[Scrcpy] Frame reader: Too many errors ({error_count}), stopping", flush=True)
+                    break
+                    
                 time.sleep(0.1)
     except Exception as e:
-        print(f"[Scrcpy] Frame reader error: {e}", flush=True)
+        print(f"[Scrcpy] Frame reader: Fatal error: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] Frame reader: Traceback: {traceback.format_exc()}", flush=True)
 
 
 def _start_scrcpy_process(device_id: str | None, max_size: int = 720, 
-                          bit_rate: int = 2000000, max_fps: int = 60) -> Optional[subprocess.Popen]:
-    """Start scrcpy process with recording to stdout."""
+                          bit_rate: int = 2000000, max_fps: int = 60, fifo_path: str | None = None) -> tuple[Optional[subprocess.Popen], str | None]:
+    """Start scrcpy process with recording to named pipe (FIFO).
+    
+    Returns:
+        (process, fifo_path) tuple. fifo_path is None if using stdout.
+    """
     if not _check_scrcpy_available():
-        return None
+        print("[Scrcpy] scrcpy not available, cannot start process", flush=True)
+        return None, None
     
     try:
+        # Create named pipe (FIFO) for better data flow control
+        if not fifo_path:
+            import tempfile
+            fifo_path = os.path.join(tempfile.gettempdir(), f"scrcpy_{device_id or 'default'}_{os.getpid()}.fifo")
+        
+        # Remove existing FIFO if any
+        if os.path.exists(fifo_path):
+            os.remove(fifo_path)
+        
+        # Create FIFO
+        try:
+            os.mkfifo(fifo_path)
+            print(f"[Scrcpy] Created FIFO: {fifo_path}", flush=True)
+        except OSError as e:
+            print(f"[Scrcpy] Failed to create FIFO {fifo_path}: {e}", flush=True)
+            return None, None
+        
         # Build scrcpy command
         cmd = ["scrcpy"]
         
@@ -179,35 +393,89 @@ def _start_scrcpy_process(device_id: str | None, max_size: int = 720,
         
         cmd.extend([
             "--max-size", str(max_size),
-            "--bit-rate", str(bit_rate),
+            "--video-bit-rate", str(bit_rate),  # Use --video-bit-rate for scrcpy 3.3.4+
             "--max-fps", str(max_fps),
-            "--record=-",  # Output to stdout
-            "--no-display",  # Don't show window
+            "--record", fifo_path,  # Output to named pipe
+            "--record-format=mkv",  # Required format for --record in scrcpy 3.3.4+
+            "--no-window",  # Disable window (implies --no-video-playback in scrcpy 3.3.4+)
             "--no-control",  # Don't accept control
             "--no-audio",  # No audio
+            # Note: --turn-screen-off requires --control, so we can't use it with --no-control
         ])
         
+        print(f"[Scrcpy] Starting scrcpy with command: {' '.join(cmd)}", flush=True)
+        
         # Start scrcpy process
+        # No need for stdout pipe when using FIFO
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE,  # Still capture stdout for stderr messages
             stderr=subprocess.PIPE,
-            bufsize=0
+            bufsize=0,  # Unbuffered
+            env=dict(os.environ, PYTHONUNBUFFERED='1')  # Ensure unbuffered output
         )
         
-        # Give it time to start
-        time.sleep(1)
+        # Give scrcpy time to start and establish connection
+        # scrcpy needs time to connect to device and start streaming
+        time.sleep(2)  # Increased wait time for scrcpy to establish connection
         
         if process.poll() is not None:
             # Process already exited
-            stderr = process.stderr.read().decode() if process.stderr else ""
-            print(f"[Scrcpy] Process exited: {stderr}", flush=True)
-            return None
+            stderr = ""
+            stdout = ""
+            try:
+                if process.stderr:
+                    stderr = process.stderr.read().decode('utf-8', errors='ignore')
+                if process.stdout:
+                    stdout = process.stdout.read().decode('utf-8', errors='ignore')
+            except Exception as e:
+                print(f"[Scrcpy] Error reading process output: {e}", flush=True)
+            
+            exit_code = process.returncode
+            print(f"[Scrcpy] Process exited immediately (code {exit_code})", flush=True)
+            if stderr:
+                print(f"[Scrcpy] stderr: {stderr}", flush=True)
+            if stdout:
+                print(f"[Scrcpy] stdout: {stdout}", flush=True)
+            
+            # Common error patterns
+            if "device offline" in stderr.lower() or "no devices" in stderr.lower():
+                print("[Scrcpy] Error: Device not found or offline. Check ADB connection.", flush=True)
+            elif "adb" in stderr.lower() and "error" in stderr.lower():
+                print("[Scrcpy] Error: ADB connection issue. Check device connection.", flush=True)
+            elif "encoder" in stderr.lower() or "codec" in stderr.lower():
+                print("[Scrcpy] Error: Video encoder issue. Device may not support H.264 encoding.", flush=True)
+            
+            # Clean up FIFO on error
+            if fifo_path and os.path.exists(fifo_path):
+                try:
+                    os.remove(fifo_path)
+                except:
+                    pass
+            return None, None
         
-        return process
+        print(f"[Scrcpy] Process started successfully (PID: {process.pid})", flush=True)
+        return process, fifo_path
+    except FileNotFoundError:
+        print("[Scrcpy] scrcpy executable not found. Please install scrcpy: https://github.com/Genymobile/scrcpy", flush=True)
+        # Clean up FIFO on error
+        if fifo_path and os.path.exists(fifo_path):
+            try:
+                os.remove(fifo_path)
+            except:
+                pass
+        return None, None
     except Exception as e:
-        print(f"[Scrcpy] Failed to start: {e}", flush=True)
-        return None
+        print(f"[Scrcpy] Failed to start: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
+        # Clean up FIFO on error
+        if fifo_path and os.path.exists(fifo_path):
+            try:
+                os.remove(fifo_path)
+            except:
+                pass
+        return None, None
 
 
 def _connect_scrcpy(device_id: str | None, max_size: int = 720, 
@@ -218,32 +486,224 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
         if key in _scrcpy_connections:
             conn = _scrcpy_connections[key]
             if conn.running:
+                print(f"[Scrcpy] Reusing existing connection for device {key}", flush=True)
                 return conn
         
-        # Start scrcpy process
-        process = _start_scrcpy_process(device_id, max_size, bit_rate, max_fps)
-        if not process:
+        print(f"[Scrcpy] Creating new connection for device {key}", flush=True)
+        
+        # Start scrcpy process with named pipe
+        process, fifo_path = _start_scrcpy_process(device_id, max_size, bit_rate, max_fps)
+        if not process or not fifo_path:
+            print("[Scrcpy] Failed to start scrcpy process or create FIFO", flush=True)
             return None
         
         # Start ffmpeg to decode H.264 stream to images
         try:
-            # Use ffmpeg to decode H.264 and output PNG frames
+            # Use ffmpeg to decode H.264 from MKV and output PNG frames
+            # scrcpy outputs MKV format with H.264 video
+            # Note: ffmpeg may need to wait for scrcpy to start outputting data
+            # Increase probesize and analyzeduration to ensure ffmpeg can properly detect the stream
+            # Use -thread_queue_size to handle buffering better
+            # Use -loglevel info to see when ffmpeg starts reading input
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-i", "pipe:0",  # Read from stdin (scrcpy output)
-                "-vf", f"fps={max_fps}",  # Set frame rate
+                "-loglevel", "warning",  # Reduce log noise, but keep warnings/errors
+                "-probesize", "32768",  # Smaller probe size for faster startup
+                "-analyzeduration", "1000000",  # Reduced analysis duration (1 second) for faster startup
+                "-fflags", "nobuffer+discardcorrupt",  # Reduce buffering and discard corrupt frames
+                "-flags", "low_delay",  # Low delay mode for real-time streaming
+                "-thread_queue_size", "512",  # Larger queue for better buffering
+                "-f", "matroska",  # Input format is MKV (from scrcpy --record-format=mkv)
+                "-i", fifo_path,  # Read from named pipe (FIFO)
+                # Don't use fps filter - it causes "No filtered frames" issue
+                # Let ffmpeg output frames at the input rate, we'll control it via reading
                 "-f", "image2pipe",  # Output as image stream
                 "-vcodec", "png",  # PNG format
+                "-pix_fmt", "rgb24",  # Use RGB24 pixel format for better compatibility
                 "-"  # Output to stdout
             ]
             
+            print(f"[Scrcpy] Starting ffmpeg with command: {' '.join(ffmpeg_cmd)}", flush=True)
+            
+            # Open FIFO for reading (this will block until scrcpy starts writing)
+            # We need to open it in a separate thread or use non-blocking mode
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
-                stdin=process.stdout,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0
             )
+            
+            # Start threads to monitor both scrcpy and ffmpeg stderr for debugging
+            def monitor_scrcpy_stderr():
+                try:
+                    if process.stderr:
+                        # Read stderr in chunks
+                        while process.poll() is None:
+                            line = process.stderr.readline()
+                            if line:
+                                decoded = line.decode('utf-8', errors='ignore').strip()
+                                if decoded:
+                                    print(f"[Scrcpy] scrcpy stderr: {decoded}", flush=True)
+                except Exception as e:
+                    print(f"[Scrcpy] Error monitoring scrcpy stderr: {e}", flush=True)
+            
+            def monitor_ffmpeg_stderr():
+                try:
+                    if ffmpeg_process.stderr:
+                        # Read stderr in chunks
+                        last_output_time = time.time()
+                        first_output = True
+                        output_lines = []
+                        while ffmpeg_process.poll() is None:
+                            line = ffmpeg_process.stderr.readline()
+                            if line:
+                                decoded = line.decode('utf-8', errors='ignore').strip()
+                                # Show all ffmpeg output for debugging
+                                if decoded:
+                                    output_lines.append(decoded)
+                                    if first_output:
+                                        print(f"[Scrcpy] ffmpeg: First output received", flush=True)
+                                        first_output = False
+                                    # Log important messages immediately
+                                    if any(keyword in decoded.lower() for keyword in ['error', 'failed', 'cannot', 'invalid', 'stream', 'input']):
+                                        print(f"[Scrcpy] ffmpeg: {decoded}", flush=True)
+                                    last_output_time = time.time()
+                            else:
+                                # No output for a while, check if ffmpeg is stuck
+                                if time.time() - last_output_time > 3.0:
+                                    # Check if ffmpeg is reading from stdin
+                                    # This is just a warning, not an error
+                                    if not hasattr(ffmpeg_process, '_warned_no_output'):
+                                        print(f"[Scrcpy] ffmpeg: No output for 3 seconds, may be waiting for input from scrcpy", flush=True)
+                                        # Print recent output lines for debugging
+                                        if output_lines:
+                                            print(f"[Scrcpy] ffmpeg: Recent output: {output_lines[-5:]}", flush=True)
+                                        ffmpeg_process._warned_no_output = True
+                                time.sleep(0.1)  # Small delay when no output
+                        # If process exited, print all output
+                        if output_lines:
+                            print(f"[Scrcpy] ffmpeg: All output: {output_lines}", flush=True)
+                except Exception as e:
+                    print(f"[Scrcpy] Error monitoring ffmpeg stderr: {e}", flush=True)
+            
+            scrcpy_stderr_monitor = threading.Thread(target=monitor_scrcpy_stderr, daemon=True, name="scrcpy-stderr-monitor")
+            scrcpy_stderr_monitor.start()
+            
+            stderr_monitor = threading.Thread(target=monitor_ffmpeg_stderr, daemon=True, name="ffmpeg-stderr-monitor")
+            stderr_monitor.start()
+            
+            # Check if scrcpy process is still running
+            if process.poll() is not None:
+                exit_code = process.returncode
+                stderr = ""
+                try:
+                    if process.stderr:
+                        stderr = process.stderr.read().decode('utf-8', errors='ignore')
+                except:
+                    pass
+                print(f"[Scrcpy] scrcpy process exited before ffmpeg setup (code {exit_code})", flush=True)
+                if stderr:
+                    print(f"[Scrcpy] scrcpy stderr: {stderr}", flush=True)
+                if ffmpeg_process:
+                    ffmpeg_process.terminate()
+                # Clean up FIFO on error
+                if fifo_path and os.path.exists(fifo_path):
+                    try:
+                        os.remove(fifo_path)
+                    except:
+                        pass
+                return None
+            
+            # Wait for scrcpy to establish connection and start streaming
+            # scrcpy needs time to:
+            # 1. Push server to device
+            # 2. Start server on device
+            # 3. Establish connection
+            # 4. Start encoding and outputting data
+            # Based on testing, scrcpy needs at least 3-5 seconds to start outputting data
+            print(f"[Scrcpy] Waiting for scrcpy to start streaming and ffmpeg to decode...", flush=True)
+            
+            # Wait for scrcpy to start outputting data (can take 5-10 seconds)
+            # scrcpy needs time to establish connection and start encoding
+            # Check if ffmpeg is receiving data by checking if it's still running and hasn't errored
+            for i in range(30):  # Wait up to 15 seconds (30 * 0.5s) to allow scrcpy to start streaming
+                time.sleep(0.5)
+                # Check if scrcpy process is still running
+                if process.poll() is not None:
+                    exit_code = process.returncode
+                    print(f"[Scrcpy] scrcpy process exited during wait (code {exit_code})", flush=True)
+                    if ffmpeg_process:
+                        ffmpeg_process.terminate()
+                    # Clean up FIFO on error
+                    if fifo_path and os.path.exists(fifo_path):
+                        try:
+                            os.remove(fifo_path)
+                        except:
+                            pass
+                    return None
+                # Check if ffmpeg process is still running
+                if ffmpeg_process.poll() is not None:
+                    exit_code = ffmpeg_process.returncode
+                    stderr = ""
+                    try:
+                        if ffmpeg_process.stderr:
+                            stderr = ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                    except:
+                        pass
+                    print(f"[Scrcpy] ffmpeg process exited during wait (code {exit_code})", flush=True)
+                    if stderr:
+                        print(f"[Scrcpy] ffmpeg stderr: {stderr}", flush=True)
+                    if process:
+                        process.terminate()
+                    # Clean up FIFO on error
+                    if fifo_path and os.path.exists(fifo_path):
+                        try:
+                            os.remove(fifo_path)
+                        except:
+                            pass
+                    return None
+                # Log progress every 2 seconds
+                if i > 0 and i % 4 == 0:  # Every 2 seconds
+                    print(f"[Scrcpy] Still waiting for scrcpy to start streaming... ({i * 0.5:.1f}s)", flush=True)
+            
+            # Check scrcpy process status again
+            if process.poll() is not None:
+                exit_code = process.returncode
+                print(f"[Scrcpy] scrcpy process exited during initialization (code {exit_code})", flush=True)
+                if ffmpeg_process:
+                    ffmpeg_process.terminate()
+                # Clean up FIFO on error
+                if fifo_path and os.path.exists(fifo_path):
+                    try:
+                        os.remove(fifo_path)
+                    except:
+                        pass
+                return None
+            
+            # Check if ffmpeg started successfully
+            if ffmpeg_process.poll() is not None:
+                stderr = ""
+                try:
+                    if ffmpeg_process.stderr:
+                        # Read remaining stderr
+                        remaining = ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                        if remaining:
+                            stderr = remaining
+                except:
+                    pass
+                print(f"[Scrcpy] ffmpeg process exited immediately (code {ffmpeg_process.returncode})", flush=True)
+                if stderr:
+                    print(f"[Scrcpy] ffmpeg stderr: {stderr}", flush=True)
+                if process:
+                    process.terminate()
+                # Clean up FIFO on error
+                if fifo_path and os.path.exists(fifo_path):
+                    try:
+                        os.remove(fifo_path)
+                    except:
+                        pass
+                return None
             
             conn = ScrcpyConnection(
                 device_id=key,
@@ -252,28 +712,66 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 running=True,
                 max_size=max_size,
                 bit_rate=bit_rate,
-                max_fps=max_fps
+                max_fps=max_fps,
+                fifo_path=fifo_path
             )
+            
+            # Mark start time for frame reader
+            conn._reader_start_time = time.time()
+            conn._logged_waiting = False
             
             # Start frame reader thread
             conn.thread = threading.Thread(
                 target=_scrcpy_frame_reader,
                 args=(conn,),
-                daemon=True
+                daemon=True,
+                name=f"scrcpy-reader-{key}"
             )
             conn.thread.start()
             
+            # Give frame reader a moment to start
+            time.sleep(0.1)
+            
+            print(f"[Scrcpy] Connection established successfully for device {key}", flush=True)
             _scrcpy_connections[key] = conn
             return conn
         except FileNotFoundError:
-            print("[Scrcpy] ffmpeg not found, cannot decode H.264 stream", flush=True)
+            print("[Scrcpy] ffmpeg not found, cannot decode H.264 stream. Please install ffmpeg: https://ffmpeg.org/download.html", flush=True)
             if process:
-                process.terminate()
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except:
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            # Clean up FIFO on error
+            if fifo_path and os.path.exists(fifo_path):
+                try:
+                    os.remove(fifo_path)
+                except:
+                    pass
             return None
         except Exception as e:
-            print(f"[Scrcpy] Failed to setup decoder: {e}", flush=True)
+            print(f"[Scrcpy] Failed to setup decoder: {type(e).__name__}: {e}", flush=True)
+            import traceback
+            print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
             if process:
-                process.terminate()
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except:
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            # Clean up FIFO on error
+            if fifo_path and os.path.exists(fifo_path):
+                try:
+                    os.remove(fifo_path)
+                except:
+                    pass
             return None
 
 
@@ -308,6 +806,14 @@ def _disconnect_scrcpy(device_id: str | None):
             if conn.thread:
                 conn.thread.join(timeout=1.0)
             
+            # Clean up FIFO
+            if conn.fifo_path and os.path.exists(conn.fifo_path):
+                try:
+                    os.remove(conn.fifo_path)
+                    print(f"[Scrcpy] Removed FIFO: {conn.fifo_path}", flush=True)
+                except Exception as e:
+                    print(f"[Scrcpy] Failed to remove FIFO {conn.fifo_path}: {e}", flush=True)
+            
             del _scrcpy_connections[key]
 
 
@@ -335,13 +841,51 @@ def get_screenshot_scrcpy(device_id: str | None = None, timeout: int = 10,
         # Connect to scrcpy
         conn = _connect_scrcpy(device_id, max_width, bit_rate, max_fps)
         if not conn:
+            print(f"[Scrcpy] get_screenshot_scrcpy: Failed to connect for device {device_id}", flush=True)
             return None
         
-        # Get latest frame from queue (non-blocking)
-        try:
-            img = conn.frame_queue.get_nowait()
-        except queue.Empty:
-            # No frame available yet, return None to fallback to other methods
+        # Wait for first frame if queue is empty
+        # Based on testing, scrcpy needs 3-5 seconds to start, then ffmpeg needs time to decode
+        # Total wait time: up to 10 seconds (200 attempts * 50ms)
+        max_wait = 200  # 200 attempts * 50ms = 10000ms (10 seconds)
+        wait_count = 0
+        img = None
+        
+        while wait_count < max_wait:
+            try:
+                img = conn.frame_queue.get_nowait()
+                if wait_count > 0:
+                    print(f"[Scrcpy] get_screenshot_scrcpy: Got first frame after {wait_count * 50}ms", flush=True)
+                break
+            except queue.Empty:
+                # Check if connection is still running
+                if not conn.running:
+                    print(f"[Scrcpy] get_screenshot_scrcpy: Connection stopped for device {device_id}", flush=True)
+                    return None
+                
+                # Check if ffmpeg process is still running
+                if conn.ffmpeg_process and conn.ffmpeg_process.poll() is not None:
+                    exit_code = conn.ffmpeg_process.returncode
+                    stderr = ""
+                    try:
+                        if conn.ffmpeg_process.stderr:
+                            stderr = conn.ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                    except:
+                        pass
+                    print(f"[Scrcpy] get_screenshot_scrcpy: ffmpeg process exited (code {exit_code})", flush=True)
+                    if stderr:
+                        print(f"[Scrcpy] get_screenshot_scrcpy: ffmpeg stderr: {stderr}", flush=True)
+                    return None
+                
+                time.sleep(0.05)  # Wait 50ms before retry
+                wait_count += 1
+                
+                # Log progress every second
+                if wait_count > 0 and wait_count % 20 == 0:
+                    print(f"[Scrcpy] get_screenshot_scrcpy: Still waiting for frame... ({wait_count * 50}ms)", flush=True)
+        
+        if img is None:
+            print(f"[Scrcpy] get_screenshot_scrcpy: No frame available after {wait_count * 50}ms for device {device_id}", flush=True)
             return None
         
         # Process image
@@ -349,11 +893,22 @@ def get_screenshot_scrcpy(device_id: str | None = None, timeout: int = 10,
         return _process_image(img, width, height, quality, max_width)
         
     except Exception as e:
-        print(f"[Scrcpy] Screenshot error: {e}", flush=True)
+        print(f"[Scrcpy] get_screenshot_scrcpy: Error: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        print(f"[Scrcpy] get_screenshot_scrcpy: Traceback: {traceback.format_exc()}", flush=True)
         return None
 
 
 def cleanup_scrcpy(device_id: str | None = None):
     """Clean up scrcpy connection for a device."""
     _disconnect_scrcpy(device_id)
+
+
+def cleanup_all_scrcpy():
+    """Clean up all scrcpy connections. Useful for system shutdown or cleanup."""
+    with _connection_lock:
+        keys = list(_scrcpy_connections.keys())
+        for key in keys:
+            _disconnect_scrcpy(key)
+        print(f"[Scrcpy] Cleaned up {len(keys)} scrcpy connection(s)", flush=True)
 
