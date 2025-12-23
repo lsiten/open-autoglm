@@ -66,6 +66,11 @@ export function useScreenStream(
       return // WebSocket is handling frames, skip HTTP polling
     }
     
+    // Don't use HTTP polling if video stream is active
+    if (usingVideoStream) {
+      return // Video stream is handling frames, skip HTTP polling
+    }
+    
     // Remove throttle check for maximum responsiveness
     // Only check if there's already an active request
     if (activeRequests >= MAX_CONCURRENT_REQUESTS) return
@@ -365,6 +370,46 @@ export function useScreenStream(
     }
 
     try {
+      // Clean up any existing MediaSource first
+      if (mediaSource) {
+        try {
+          // Only call endOfStream if we have data in the buffer
+          // Otherwise it causes DEMUXER_ERROR_COULD_NOT_OPEN
+          if (mediaSource.readyState === 'open' && sourceBuffer) {
+            // Wait for sourceBuffer to finish updating
+            if (sourceBuffer.updating) {
+              await new Promise<void>((resolve) => {
+                sourceBuffer!.addEventListener('updateend', () => resolve(), { once: true })
+              })
+            }
+            // Only end stream if we have buffered data
+            if (sourceBuffer.buffered.length > 0) {
+              mediaSource.endOfStream()
+            }
+          }
+        } catch (e) {
+          // Ignore cleanup errors
+          console.warn('[useScreenStream] Error cleaning up MediaSource:', e)
+        }
+        if (videoEl.src && videoEl.src.startsWith('blob:')) {
+          URL.revokeObjectURL(videoEl.src)
+        }
+        mediaSource = null
+        sourceBuffer = null
+      }
+      
+      // Clear any existing source buffer
+      if (sourceBuffer) {
+        try {
+          if (sourceBuffer.updating) {
+            sourceBuffer.abort()
+          }
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        sourceBuffer = null
+      }
+      
       videoElement.value = videoEl
       
       // Check if MediaSource is supported
@@ -376,12 +421,31 @@ export function useScreenStream(
       // Create MediaSource
       mediaSource = new MediaSource()
       const url = URL.createObjectURL(mediaSource)
+      
+      // Set src BEFORE checking for errors
       videoEl.src = url
+      videoEl.load() // Explicitly load the new source
+      
+      console.log('[useScreenStream] MediaSource created, URL:', url)
+      console.log('[useScreenStream] Video element src set to:', videoEl.src)
 
       // Wait for MediaSource to be ready
       await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('MediaSource sourceopen timeout'))
+        }, 5000)
+        
         mediaSource!.addEventListener('sourceopen', () => {
+          clearTimeout(timeout)
           try {
+            console.log('[useScreenStream] MediaSource sourceopen event fired')
+            
+            // Check video element error before proceeding
+            if (videoEl.error) {
+              reject(new Error(`Video element error before sourceopen: ${videoEl.error.message || 'Unknown'}`))
+              return
+            }
+            
             // Add MP4 source buffer for fragmented MP4
             const codecOptions = [
               'video/mp4; codecs="avc1.42E01E"',  // Baseline profile, level 3.0
@@ -394,6 +458,7 @@ export function useScreenStream(
             let supported = false
             for (const mimeType of codecOptions) {
               if (MediaSource.isTypeSupported(mimeType)) {
+                console.log(`[useScreenStream] Using codec: ${mimeType}`)
                 sourceBuffer = mediaSource!.addSourceBuffer(mimeType)
                 supported = true
                 break
@@ -406,23 +471,122 @@ export function useScreenStream(
             }
 
             sourceBuffer!.mode = 'sequence'
+            
+            // Listen for sourceBuffer errors
+            sourceBuffer!.addEventListener('error', (e) => {
+              console.error('[useScreenStream] SourceBuffer error:', e)
+            })
+            
+            // Listen for video element errors
+            videoEl.addEventListener('error', (e) => {
+              console.error('[useScreenStream] Video element error:', videoEl.error)
+            })
+            
+            console.log('[useScreenStream] SourceBuffer created successfully')
             resolve()
           } catch (e) {
+            clearTimeout(timeout)
             reject(e)
           }
         }, { once: true })
 
-        mediaSource!.addEventListener('error', () => {
+        mediaSource!.addEventListener('error', (e) => {
+          clearTimeout(timeout)
+          console.error('[useScreenStream] MediaSource error event:', e)
           reject(new Error('MediaSource error'))
         }, { once: true })
       })
 
-      // Start fetching H.264 stream
-      await fetchVideoStream()
+      // Set a timeout to detect if video stream doesn't start receiving data
+      let streamStartTimeout: ReturnType<typeof setTimeout> | null = null
+      let hasReceivedDataRef = { value: false }  // Use object to share state between functions
+      let streamStartTime = Date.now()
+      
+      streamStartTimeout = setTimeout(() => {
+        if (usingVideoStream && !hasReceivedDataRef.value) {
+          const elapsed = Date.now() - streamStartTime
+          console.warn(`[useScreenStream] Video stream timeout - no data received after ${elapsed}ms, falling back to image stream`)
+          console.warn('[useScreenStream] Possible causes:')
+          console.warn('  1. Backend VideoStreamer is not sending data')
+          console.warn('  2. scrcpy/ffmpeg processes failed to start')
+          console.warn('  3. Network connection issue')
+          console.warn('  4. Device not connected or scrcpy unavailable')
+          stopVideoStream()
+          useVideoStream.value = false
+          // Trigger restart of stream loop to use image stream
+          if (activeDeviceId.value) {
+            setTimeout(() => {
+              startStreamLoop()
+            }, 100)
+          }
+        }
+      }, 8000)  // Increase to 8 seconds to give backend more time to start scrcpy/ffmpeg
+      
+      // Start fetching H.264 stream in background (don't await - let it run continuously)
+      // The stream will run in the background and append data to sourceBuffer
+      // Pass streamStartTimeout and hasReceivedDataRef so fetchVideoStream can update them
+      fetchVideoStream(streamStartTimeout, hasReceivedDataRef)
+        .then(() => {
+          if (streamStartTimeout) {
+            clearTimeout(streamStartTimeout)
+          }
+        })
+        .catch((e) => {
+          if (streamStartTimeout) {
+            clearTimeout(streamStartTimeout)
+          }
+          
+          // Check if this is a stream end error (not a fatal error)
+          const isStreamEndError = e.message && (
+            e.message.includes('Video stream ended') ||
+            e.message.includes('will attempt to reconnect')
+          )
+          
+          if (isStreamEndError && hasReceivedDataRef.value) {
+            // Stream ended but we received data - backend may have stopped
+            // Wait a bit and try to reconnect
+            console.log('[useScreenStream] Stream ended after receiving data, will attempt reconnect in 2 seconds...')
+            setTimeout(() => {
+              if (activeDeviceId.value && useVideoStream.value) {
+                console.log('[useScreenStream] Attempting to reconnect video stream...')
+                startVideoStream(videoElement.value!)
+                  .then((success) => {
+                    if (success) {
+                      console.log('[useScreenStream] ✅ Video stream reconnected successfully')
+                    } else {
+                      console.warn('[useScreenStream] Video stream reconnection failed, falling back')
+                      stopVideoStream()
+                      useVideoStream.value = false
+                      startStreamLoop()
+                    }
+                  })
+                  .catch((reconnectError) => {
+                    console.error('[useScreenStream] Video stream reconnection error:', reconnectError)
+                    stopVideoStream()
+                    useVideoStream.value = false
+                    startStreamLoop()
+                  })
+              }
+            }, 2000)
+            return // Don't stop stream yet, wait for reconnect
+          }
+          
+          console.error('[useScreenStream] Video stream fetch error:', e)
+          // If stream fails after starting, stop and fallback
+          stopVideoStream()
+          useVideoStream.value = false
+          // Trigger restart of stream loop to use image stream
+          if (activeDeviceId.value) {
+            setTimeout(() => {
+              startStreamLoop()
+            }, 100)
+          }
+        })
       
       usingVideoStream = true
+      useVideoStream.value = true  // Ensure this is true so video element is shown
       videoStreamUrl.value = `${apiBaseUrl}/control/stream/video`
-      console.log('[useScreenStream] ✅ Video stream (MSE) started successfully')
+      console.log('[useScreenStream] ✅ Video stream (MSE) started successfully, video element should be visible')
       return true
     } catch (e: any) {
       console.warn(`[useScreenStream] Video stream failed: ${e.message || e}`, e)
@@ -436,7 +600,7 @@ export function useScreenStream(
   /**
    * Fetch H.264 video stream and append to source buffer.
    */
-  const fetchVideoStream = async () => {
+  const fetchVideoStream = async (timeoutRef?: ReturnType<typeof setTimeout> | null, hasReceivedDataRef?: { value: boolean }) => {
     if (!sourceBuffer || !activeDeviceId.value) {
       return
     }
@@ -445,14 +609,21 @@ export function useScreenStream(
     const streamUrl = `${apiBaseUrl}/control/stream/video`
 
     try {
+      console.log(`[useScreenStream] Fetching video stream from: ${streamUrl}`)
+      const fetchStartTime = Date.now()
       const response = await fetch(streamUrl, {
         signal: videoAbortController.signal,
         headers: {
           'Accept': 'video/mp4'
         }
       })
+      
+      const fetchTime = Date.now() - fetchStartTime
+      console.log(`[useScreenStream] Video stream response received (${fetchTime}ms): status=${response.status}, ok=${response.ok}`)
+      console.log(`[useScreenStream] Response headers:`, Object.fromEntries(response.headers.entries()))
 
       if (!response.ok) {
+        console.error(`[useScreenStream] Video stream HTTP error: ${response.status} ${response.statusText}`)
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
@@ -461,38 +632,130 @@ export function useScreenStream(
       }
 
       streamReader = response.body.getReader()
+      const streamReadStartTime = Date.now()
+      console.log('[useScreenStream] Video stream reader created, starting to read chunks...')
 
-      // Process stream chunks
+      // Set a timeout to detect if stream is not receiving data
+      let lastChunkTime = Date.now()
+      const STREAM_TIMEOUT = 10000  // 10 seconds timeout
+      let chunks_yielded = 0  // Track chunks for logging
+      let hasReceivedDataInReader = false  // Track if we've received data in the reader
+      
+      // Process stream chunks continuously
       while (true) {
         const { done, value } = await streamReader.read()
         
         if (done) {
-          // Stream ended, this might be an error
-          console.warn('[useScreenStream] Video stream ended unexpectedly')
-          break
+          // Stream ended - this could be normal (connection closed) or an error
+          // Check if we received any data before the stream ended
+          if (hasReceivedDataInReader && chunks_yielded > 0) {
+            console.warn('[useScreenStream] Video stream ended after receiving data - backend may have stopped streaming')
+            // Don't throw error immediately - try to reconnect
+            // The error will be caught and handled by startVideoStream
+            throw new Error('Video stream ended - will attempt to reconnect')
+          } else {
+            console.warn('[useScreenStream] Video stream ended without receiving data - backend may not be ready')
+            throw new Error('Video stream ended without data - backend not ready')
+          }
+        }
+        
+        if (!value || value.length === 0) {
+          // Empty chunk, check timeout
+          if (Date.now() - lastChunkTime > STREAM_TIMEOUT) {
+            console.error('[useScreenStream] Video stream timeout - no data received for 10 seconds')
+            throw new Error('Video stream timeout - no data received')
+          }
+          // Wait a bit before next read
+          await new Promise(resolve => setTimeout(resolve, 100))
+          continue
+        }
+        
+        // Update last chunk time and mark that we've received data
+        lastChunkTime = Date.now()
+        if (!hasReceivedDataInReader) {
+          hasReceivedDataInReader = true
+          const timeToFirstChunk = Date.now() - streamReadStartTime
+          console.log(`[useScreenStream] ✅ First video chunk received (${value.length} bytes) after ${timeToFirstChunk}ms`)
+          // Clear the timeout since we received data
+          if (timeoutRef) {
+            clearTimeout(timeoutRef)
+          }
         }
 
-        // Wait for source buffer to be ready
+        // Check if MediaSource and video element are still valid BEFORE processing chunk
+        if (!mediaSource) {
+          console.warn('[useScreenStream] MediaSource is null, stopping stream')
+          throw new Error('MediaSource is null')
+        }
+        
+        if (mediaSource.readyState !== 'open') {
+          console.warn(`[useScreenStream] MediaSource is not open (state: ${mediaSource.readyState}), stopping stream`)
+          throw new Error(`MediaSource is not open, state: ${mediaSource.readyState}`)
+        }
+        
+        if (videoElement.value && videoElement.value.error) {
+          const errorCode = videoElement.value.error.code
+          const errorMessage = videoElement.value.error.message || 'Unknown error'
+          console.error('[useScreenStream] Video element has error:', {
+            code: errorCode,
+            message: errorMessage
+          })
+          throw new Error(`Video element error: code ${errorCode}, ${errorMessage}`)
+        }
+        
+        if (!sourceBuffer) {
+          console.warn('[useScreenStream] SourceBuffer is null, stopping stream')
+          throw new Error('SourceBuffer is null')
+        }
+
+        // Wait for source buffer to be ready (must wait if updating)
         if (sourceBuffer.updating) {
-          await new Promise(resolve => {
-            sourceBuffer!.addEventListener('updateend', resolve, { once: true })
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('SourceBuffer updateend timeout'))
+            }, 5000)
+            
+            sourceBuffer!.addEventListener('updateend', () => {
+              clearTimeout(timeout)
+              resolve()
+            }, { once: true })
+            
+            sourceBuffer!.addEventListener('error', (e) => {
+              clearTimeout(timeout)
+              reject(new Error(`SourceBuffer error: ${e}`))
+            }, { once: true })
           })
         }
 
         // Append MP4 fragment data to source buffer
         try {
-          if (!sourceBuffer.updating) {
-            sourceBuffer.appendBuffer(value)
-          } else {
-            await new Promise(resolve => {
-              sourceBuffer!.addEventListener('updateend', resolve, { once: true })
-            })
-            sourceBuffer.appendBuffer(value)
+          // Final check before appending
+          if (sourceBuffer.updating) {
+            console.warn('[useScreenStream] SourceBuffer is still updating after wait, skipping chunk')
+            continue
+          }
+          
+          if (mediaSource.readyState !== 'open') {
+            console.warn('[useScreenStream] MediaSource closed during append, stopping')
+            throw new Error('MediaSource closed during append')
+          }
+          
+          // Append buffer (we already waited if it was updating)
+          sourceBuffer.appendBuffer(value)
+          chunks_yielded++
+          if (chunks_yielded === 1) {
+            if (hasReceivedDataRef) {
+              hasReceivedDataRef.value = true
+            }
+            console.log('[useScreenStream] ✅ First video chunk appended to source buffer, video stream is working')
+            if (timeoutRef) {
+              clearTimeout(timeoutRef)
+            }
           }
         } catch (e: any) {
           if (e.name === 'QuotaExceededError') {
             // Buffer is full, remove old data
-            if (sourceBuffer.buffered.length > 0) {
+            if (sourceBuffer && sourceBuffer.buffered.length > 0) {
               try {
                 sourceBuffer.remove(0, sourceBuffer.buffered.start(1) || sourceBuffer.buffered.end(0))
               } catch {
@@ -502,6 +765,23 @@ export function useScreenStream(
             await new Promise(resolve => setTimeout(resolve, 100))
             continue
           }
+          
+          // Check if video element has error
+          if (videoElement.value && videoElement.value.error) {
+            console.error('[useScreenStream] Video element error detected:', {
+              code: videoElement.value.error.code,
+              message: videoElement.value.error.message
+            })
+            throw new Error(`Video element error: code ${videoElement.value.error.code}, ${videoElement.value.error.message || 'Unknown error'}`)
+          }
+          
+          // Check if MediaSource is still open
+          if (mediaSource && mediaSource.readyState !== 'open') {
+            console.error('[useScreenStream] MediaSource is not open, state:', mediaSource.readyState)
+            throw new Error(`MediaSource is not open, state: ${mediaSource.readyState}`)
+          }
+          
+          console.error('[useScreenStream] Error appending buffer:', e)
           throw e
         }
       }
@@ -535,10 +815,11 @@ export function useScreenStream(
     }
 
     // Clean up source buffer
-    if (sourceBuffer) {
+    const currentSourceBuffer = sourceBuffer
+    if (currentSourceBuffer) {
       try {
-        if (sourceBuffer.updating) {
-          sourceBuffer.abort()
+        if (currentSourceBuffer.updating) {
+          currentSourceBuffer.abort()
         }
       } catch (e) {
         // Ignore errors
@@ -547,18 +828,37 @@ export function useScreenStream(
     }
 
     // Clean up MediaSource
-    if (mediaSource) {
+    const currentMediaSource = mediaSource
+    if (currentMediaSource) {
       try {
-        if (mediaSource.readyState === 'open') {
-          mediaSource.endOfStream()
+        // Only call endOfStream if we have data in the buffer
+        // Otherwise it causes DEMUXER_ERROR_COULD_NOT_OPEN
+        // Note: We check currentSourceBuffer (captured before setting to null)
+        // and only end stream if we actually have buffered data
+        if (currentMediaSource.readyState === 'open' && currentSourceBuffer) {
+          // Only end stream if we have buffered data (metadata received)
+          if (currentSourceBuffer.buffered.length > 0) {
+            try {
+              currentMediaSource.endOfStream()
+            } catch (e) {
+              // Ignore errors - MediaSource may already be closed
+              console.warn('[useScreenStream] Error calling endOfStream:', e)
+            }
+          }
+          // If no buffered data, don't call endOfStream - just close
         }
       } catch (e) {
-        // Ignore errors
+        // Ignore cleanup errors
+        console.warn('[useScreenStream] Error ending MediaSource stream:', e)
       }
       
-      if (videoElement.value && videoElement.value.src) {
-        URL.revokeObjectURL(videoElement.value.src)
-        videoElement.value.src = ''
+      if (videoElement.value) {
+        const currentSrc = videoElement.value.src
+        if (currentSrc && currentSrc.startsWith('blob:')) {
+          URL.revokeObjectURL(currentSrc)
+        }
+        // Don't set src to empty string - let it be cleared naturally
+        // Setting to empty string can trigger error events
       }
       
       mediaSource = null
@@ -590,27 +890,38 @@ export function useScreenStream(
     // This uses scrcpy's H.264 video stream for optimal performance
     // Note: videoElement should be set by the component before calling startStreamLoop
     if (useVideoStream.value) {
-      if (!videoElement.value) {
-        console.warn('[useScreenStream] Video element not ready, will try after component mounts')
-        // Wait a bit for video element to be ready (component might not be mounted yet)
-        await new Promise(resolve => setTimeout(resolve, 100))
+      // Wait longer for video element to be ready (component might not be mounted yet)
+      let retries = 10
+      while (!videoElement.value && retries > 0) {
+        console.log(`[useScreenStream] Waiting for video element... (${retries} retries left)`)
+        await new Promise(resolve => setTimeout(resolve, 200))
+        retries--
       }
       
       if (videoElement.value) {
         console.log('[useScreenStream] Attempting H.264 video stream (MSE) (priority 1: best performance)')
-        const videoStarted = await startVideoStream(videoElement.value)
-        if (videoStarted) {
-          console.log('[useScreenStream] ✅ Using H.264 video stream (MSE) (best performance, continuous stream)')
-          return // Exit early, video stream is active
+        try {
+          const videoStarted = await startVideoStream(videoElement.value)
+          if (videoStarted) {
+            console.log('[useScreenStream] ✅ Using H.264 video stream (MSE) (best performance, continuous stream)')
+            // Don't return immediately - let the stream start in background
+            // But mark that we're using video stream so we don't start other methods
+            usingVideoStream = true
+            return // Exit early, video stream is active
+          }
+        } catch (e) {
+          console.error('[useScreenStream] Video stream start error:', e)
         }
         // Video stream failed, disable it and continue to fallback methods
         console.warn('[useScreenStream] Video stream failed, disabling and trying fallback methods')
+        stopVideoStream() // Ensure cleanup
         useVideoStream.value = false
+        videoStreamUrl.value = '' // Clear video stream URL
         // Continue to try other methods below
       } else {
-        console.warn('[useScreenStream] Video element still not ready, skipping video stream')
-        // Disable video stream if element is not ready
-        useVideoStream.value = false
+        console.warn('[useScreenStream] Video element still not ready after waiting, skipping video stream')
+        // Don't disable video stream - maybe it will be ready next time
+        // Just continue to fallback methods for now
       }
     }
     
@@ -659,10 +970,13 @@ export function useScreenStream(
     }
     
     // Priority 4: Fallback to HTTP polling (lowest performance, highest latency)
-    console.warn('[useScreenStream] Video stream, WebSocket and MJPEG failed, falling back to HTTP polling (priority 4: lowest performance)')
+    console.log('[useScreenStream] Using HTTP polling for frame streaming (reliable fallback method)')
     // Start initial frame fetch immediately
     if (activeRequests === 0) {
+      console.log('[useScreenStream] Starting HTTP polling loop...')
       tryFetchFrame()
+    } else {
+      console.log('[useScreenStream] HTTP polling already active, skipping start')
     }
 
     // Keep the loop running to ensure continuous updates

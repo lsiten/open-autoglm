@@ -18,8 +18,9 @@ class ScreenStreamer:
         self.stop_event = threading.Event()
         self.fps = 60.0 # Increased to 60fps for smoother animations
         # Default settings for smooth streaming
-        self.quality = 50
-        self.max_width = 540
+        # Increased quality for better image clarity
+        self.quality = 85  # Higher quality (was 50)
+        self.max_width = 1080  # Higher resolution (was 540)
         
         # Screenshot method cache (remember fastest method)
         self._fastest_method = None  # 'scrcpy', 'raw', 'gzip', 'png', or None (auto-detect)
@@ -251,10 +252,13 @@ class ScreenStreamer:
     
     def _get_preferred_method(self) -> Optional[str]:
         """Get the preferred screenshot method based on performance history.
-        scrcpy re-enabled with fixed parameters for scrcpy 3.3.4+.
+        
+        Note: scrcpy is NOT used for screenshots - it's only used for video streaming.
+        Screenshots use ADB methods (raw/gzip/png) for reliability.
         """
-        # scrcpy re-enabled with named pipe (FIFO) implementation
-        scrcpy_enabled = True
+        # scrcpy is disabled for screenshots - use ADB methods only
+        # scrcpy is used for video streaming via VideoStreamer, not for screenshots
+        scrcpy_enabled = False
         
         if scrcpy_enabled:
             # First, check if scrcpy is available (highest priority)
@@ -266,7 +270,7 @@ class ScreenStreamer:
                 # scrcpy not available or check failed, continue to other methods
                 pass
         
-        # If scrcpy is not available or disabled, use the fastest method from history
+        # Use the fastest ADB method from history (raw/gzip/png)
         return self._fastest_method
     
     def _get_actual_fps(self) -> float:

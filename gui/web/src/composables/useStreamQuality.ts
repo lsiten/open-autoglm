@@ -14,11 +14,11 @@ export function useStreamQuality(apiBaseUrl: string) {
     let w = 480
     
     switch (key) {
-      case '1080p': q = 80; w = 1080; break
-      case '720p': q = 70; w = 720; break
-      case '480p': q = 60; w = 480; break
-      case '360p': q = 50; w = 360; break
-      case 'auto': q = 50; w = 360; break
+      case '1080p': q = 85; w = 1080; break
+      case '720p': q = 80; w = 720; break
+      case '480p': q = 70; w = 480; break
+      case '360p': q = 60; w = 360; break
+      case 'auto': q = 85; w = 1080; break  // Higher default quality (was 50/360)
     }
     
     try {

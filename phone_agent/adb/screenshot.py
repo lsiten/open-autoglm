@@ -54,13 +54,12 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10, quality: int
     start_time = time.time()
     adb_prefix = _get_adb_prefix(device_id)
     
-    # Temporarily disable scrcpy due to issues with --record=- outputting logs instead of video data
-    # This causes black screens and delays. Will re-enable when scrcpy issue is fixed.
-    # Always try scrcpy first if available (highest performance, regardless of preferred_method)
-    # This ensures we use the fastest method whenever possible
-    scrcpy_tried = False
-    scrcpy_error = None
-    scrcpy_enabled = True  # Re-enabled with named pipe (FIFO) implementation
+    # scrcpy is disabled for screenshot capture - use ADB methods only
+    # scrcpy is used for video streaming (device mirroring) via VideoStreamer, not for screenshots
+    # This separation ensures:
+    # - Screenshots use reliable ADB methods (raw/gzip/png)
+    # - Device mirroring uses scrcpy H.264 video stream for better performance
+    scrcpy_enabled = False  # Disabled for screenshot - use ADB methods only
     
     if scrcpy_enabled:
         try:

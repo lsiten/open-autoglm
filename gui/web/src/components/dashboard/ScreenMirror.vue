@@ -34,7 +34,8 @@
              @mouseup="$emit('mouse-up', $event)"
              @mouseleave="$emit('mouse-up', $event)">
           <!-- H.264 Video Stream (MSE) - Highest Priority -->
-          <video v-if="useVideoStream" 
+          <!-- Use v-show instead of v-if to ensure element is always in DOM for ref access -->
+          <video v-show="useVideoStream && videoStreamUrl" 
                 ref="videoRef"
                 autoplay
                 playsinline
@@ -42,10 +43,12 @@
                 class="w-full h-full object-fill pointer-events-none select-none"
                 @loadedmetadata="onVideoLoaded"
                 @error="onVideoError"
+                @loadeddata="onVideoLoaded"
+                @canplay="onVideoLoaded"
                 style="display: block;" />
           
           <!-- MJPEG Stream (if enabled and video not available) -->
-          <img v-else-if="useMjpegStream && mjpegStreamUrl" 
+          <img v-if="!useVideoStream && useMjpegStream && mjpegStreamUrl" 
                ref="mjpegImgRef"
                :src="mjpegStreamUrl" 
                class="w-full h-full object-fill pointer-events-none select-none" 
@@ -55,14 +58,14 @@
                style="display: block;" />
           
           <!-- HTTP Polling (default and fallback) -->
-          <img v-else-if="latestScreenshot" 
+          <img v-if="!useVideoStream && !(useMjpegStream && mjpegStreamUrl) && latestScreenshot" 
                :src="latestScreenshot" 
                class="w-full h-full object-fill pointer-events-none select-none" 
                draggable="false"
                @load="onHttpImageLoad" />
           
           <!-- Loading State -->
-          <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-3 bg-[#050505]">
+          <div v-if="!useVideoStream && !(useMjpegStream && mjpegStreamUrl) && !latestScreenshot" class="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-3 bg-[#050505]">
             <div class="relative">
               <div class="w-12 h-12 border-2 border-gray-700 rounded-full animate-spin border-t-blue-500"></div>
               <el-icon class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-600"><VideoCamera /></el-icon>
@@ -101,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDown, VideoCamera, House, Back, Menu } from '@element-plus/icons-vue'
 
@@ -140,11 +143,25 @@ let mjpegCheckInterval: number | null = null
 
 // Expose video ref to parent for composable when mounted
 onMounted(() => {
-  if (videoRef.value) {
-    // Emit video element to parent so composable can use it
-    emit('video-element-ready', videoRef.value)
-  }
+  // Use nextTick to ensure DOM is fully rendered
+  nextTick(() => {
+    if (videoRef.value) {
+      console.log('[ScreenMirror] Video element ready, emitting to parent')
+      // Emit video element to parent so composable can use it
+      emit('video-element-ready', videoRef.value)
+    } else {
+      console.warn('[ScreenMirror] Video element not found in onMounted')
+    }
+  })
 })
+
+// Also watch for videoRef changes (in case it's created later)
+watch(videoRef, (newVal) => {
+  if (newVal) {
+    console.log('[ScreenMirror] Video ref changed, emitting to parent')
+    emit('video-element-ready', newVal)
+  }
+}, { immediate: true })
 
 // Watch for videoElement prop - if it's set externally, use it
 watch(() => props.videoElement, (newVal) => {

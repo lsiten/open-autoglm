@@ -272,7 +272,12 @@ def _read_png_from_stream(stream, timeout=0.5) -> Optional[Image.Image]:
 
 
 def _scrcpy_socket_frame_reader(conn: ScrcpyConnection):
-    """Background thread to read frames from scrcpy socket and decode with ffmpeg."""
+    """Background thread to read frames from scrcpy socket and decode with ffmpeg.
+    
+    Note: This function is currently not used. The current implementation uses
+    stdout mode with _scrcpy_frame_reader() which is simpler and more reliable.
+    This socket reader code is kept for potential future use.
+    """
     try:
         if not conn.socket_conn:
             print(f"[Scrcpy] Socket frame reader: socket not available", flush=True)
@@ -289,7 +294,7 @@ def _scrcpy_socket_frame_reader(conn: ScrcpyConnection):
             "-f", "image2pipe",  # Output as image stream
             "-vcodec", "png",  # PNG format
             "-pix_fmt", "rgb24",  # Use RGB24 pixel format
-            "-vsync", "0",  # Don't sync video
+            "-fps_mode", "passthrough",  # Use fps_mode instead of deprecated -vsync
             "-"  # Output to stdout
         ]
         
@@ -415,8 +420,11 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
         no_data_count = 0
         
         # Check if stdout is readable and wait a bit for ffmpeg to start outputting
-        print(f"[Scrcpy] Frame reader: Waiting 3 seconds for ffmpeg to start outputting...", flush=True)
-        time.sleep(3)  # Give ffmpeg more time to start outputting data
+        # ffmpeg may need to wait for the first keyframe (I-frame) before it can decode
+        # Note: ffmpeg has detected the stream (from stderr logs), but may need keyframe to start outputting PNG
+        print(f"[Scrcpy] Frame reader: Waiting 10 seconds for ffmpeg to receive first keyframe and start outputting PNG frames...", flush=True)
+        print(f"[Scrcpy] Frame reader: ffmpeg has detected video stream, waiting for first I-frame...", flush=True)
+        time.sleep(10)  # Give ffmpeg more time to receive keyframe and start outputting data
         
         # Check process status again
         if conn.ffmpeg_process:
@@ -537,22 +545,22 @@ def _scrcpy_frame_reader(conn: ScrcpyConnection):
         print(f"[Scrcpy] Frame reader: Traceback: {traceback.format_exc()}", flush=True)
 
 
-def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720, 
-                               bit_rate: int = 2000000, max_fps: int = 60, 
-                               port: int = 8886) -> tuple[Optional[subprocess.Popen], Optional[int]]:
-    """Start scrcpy process with socket connection.
+def _start_scrcpy_stdout(device_id: str | None, max_size: int = 720, 
+                          bit_rate: int = 2000000, max_fps: int = 60) -> Optional[subprocess.Popen]:
+    """Start scrcpy process with stdout output (MKV stream).
     
-    Uses --port parameter to specify a fixed port, then connects directly to that socket.
+    Uses --record=- to output video stream to stdout, which is then decoded by ffmpeg.
+    This is the recommended method as it's simpler and more reliable than socket connection.
     
     Returns:
-        (process, port) tuple. port is None if failed.
+        scrcpy process or None if failed.
     """
     if not _check_scrcpy_available():
         print("[Scrcpy] scrcpy not available, cannot start process", flush=True)
-        return None, None
+        return None
     
     try:
-        # Build scrcpy command with --port parameter
+        # Build scrcpy command with stdout output
         cmd = ["scrcpy"]
         
         if device_id:
@@ -562,7 +570,6 @@ def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720,
             "--max-size", str(max_size),
             "--video-bit-rate", str(bit_rate),
             "--max-fps", str(max_fps),
-            "--port", str(port),  # Use fixed port for socket connection
             "--record=-",  # Output to stdout (required, otherwise scrcpy exits with error)
             "--record-format=mkv",  # Required format for --record=- in scrcpy 3.3.4+
             "--no-window",
@@ -570,7 +577,7 @@ def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720,
             "--no-audio",
         ])
         
-        print(f"[Scrcpy] Starting scrcpy with socket on port {port}: {' '.join(cmd)}", flush=True)
+        print(f"[Scrcpy] Starting scrcpy with stdout output: {' '.join(cmd)}", flush=True)
         
         # Start scrcpy process
         process = subprocess.Popen(
@@ -582,7 +589,7 @@ def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720,
         )
         
         # Give scrcpy time to start and establish connection
-        time.sleep(3)  # Wait for scrcpy to start and establish socket
+        time.sleep(3)  # Wait for scrcpy to start and establish connection
         
         if process.poll() is not None:
             stderr = ""
@@ -596,16 +603,16 @@ def _start_scrcpy_with_socket(device_id: str | None, max_size: int = 720,
             print(f"[Scrcpy] Process exited immediately (code {exit_code})", flush=True)
             if stderr:
                 print(f"[Scrcpy] stderr: {stderr}", flush=True)
-            return None, None
+            return None
         
         print(f"[Scrcpy] Process started successfully (PID: {process.pid})", flush=True)
-        return process, port
+        return process
         
     except Exception as e:
         print(f"[Scrcpy] Failed to start scrcpy process: {type(e).__name__}: {e}", flush=True)
         import traceback
         print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
-        return None, None
+        return None
 
 
 def _connect_scrcpy_socket(port: int, timeout: int = 5) -> Optional[socket.socket]:
@@ -615,6 +622,10 @@ def _connect_scrcpy_socket(port: int, timeout: int = 5) -> Optional[socket.socke
     1. Device name (64 bytes, null-terminated)
     2. Initial configuration (12 bytes)
     3. Video stream (H.264 NAL units)
+    
+    Note: This function is currently not used. The current implementation uses
+    stdout mode (--record=-) which is simpler and more reliable. This socket
+    connection code is kept for potential future use.
     
     Returns:
         socket connection or None if failed.
@@ -674,6 +685,10 @@ def _read_h264_from_socket(sock: socket.socket) -> Optional[bytes]:
     - 4 bytes: PTS (presentation timestamp) in microseconds
     - 4 bytes: packet size
     - N bytes: H.264 data
+    
+    Note: This function is currently not used. The current implementation uses
+    stdout mode (--record=-) which is simpler and more reliable. This socket
+    reading code is kept for potential future use.
     
     Returns:
         H.264 data bytes or None if failed.
@@ -749,6 +764,8 @@ def _start_scrcpy_process(device_id: str | None, max_size: int = 720,
             "--max-fps", str(max_fps),
             "--record", fifo_path,  # Output to named pipe
             "--record-format=mkv",  # Required format for --record in scrcpy 3.3.4+
+            # Don't specify --video-encoder, let scrcpy auto-detect the best encoder
+            # Different devices support different encoders (OMX.hisi.video.encoder.avc, c2.android.avc.encoder, etc.)
             "--no-window",  # Disable window (implies --no-video-playback in scrcpy 3.3.4+)
             "--no-control",  # Don't accept control
             "--no-audio",  # No audio
@@ -840,7 +857,11 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
         max_size: Maximum size
         bit_rate: Bit rate
         max_fps: Maximum FPS
-        use_socket: If True, use direct socket connection instead of FIFO
+        use_socket: If True, use stdout mode (--record=-) for video stream.
+                    If False, use FIFO (named pipe) mode.
+                    Note: Despite the name, both modes use scrcpy's stdout/FIFO output,
+                    not direct socket connection. Socket connection code exists but is
+                    not currently used as stdout mode is simpler and more reliable.
     """
     with _connection_lock:
         key = device_id or "default"
@@ -853,15 +874,17 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
         print(f"[Scrcpy] Creating new connection for device {key} (use_socket={use_socket})", flush=True)
         
         if use_socket:
-            # Use stdout pipe (simpler than FIFO, and scrcpy requires --record)
-            # scrcpy's --port is for control connection, video stream is via ADB port forward
-            # So we use --record=- to output to stdout, then read from stdout
-            process, _ = _start_scrcpy_with_socket(device_id, max_size, bit_rate, max_fps, port=8886)
+            # Use stdout pipe mode (simpler and more reliable than FIFO)
+            # scrcpy outputs MKV stream to stdout via --record=-, which is then decoded by ffmpeg
+            # Note: use_socket=True actually uses stdout mode, not direct socket connection
+            # This is the recommended approach as it's simpler and more reliable
+            process = _start_scrcpy_stdout(device_id, max_size, bit_rate, max_fps)
             if not process:
                 print("[Scrcpy] Failed to start scrcpy process with stdout output", flush=True)
                 return None
             
             # Use ffmpeg to decode H.264 from MKV stream (from stdout)
+            ffmpeg_process = None
             try:
                 ffmpeg_cmd = [
                     "ffmpeg",
@@ -876,7 +899,7 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                     "-f", "image2pipe",  # Output as image stream
                     "-vcodec", "png",  # PNG format
                     "-pix_fmt", "rgb24",  # Use RGB24 pixel format
-                    "-vsync", "0",  # Don't sync video
+                    "-fps_mode", "passthrough",  # Use fps_mode instead of deprecated -vsync
                     "-"  # Output to stdout
                 ]
                 
@@ -931,16 +954,68 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 scrcpy_stderr_monitor = threading.Thread(target=monitor_scrcpy_stderr, daemon=True, name="scrcpy-stderr-monitor")
                 scrcpy_stderr_monitor.start()
                 
+                # Wait a bit for processes to initialize
+                time.sleep(1)  # Give ffmpeg time to start
+                
+                # Check if scrcpy process is still running
+                if process.poll() is not None:
+                    exit_code = process.returncode
+                    stderr = ""
+                    try:
+                        if process.stderr:
+                            stderr = process.stderr.read().decode('utf-8', errors='ignore')
+                    except:
+                        pass
+                    print(f"[Scrcpy] scrcpy process exited during initialization (code {exit_code})", flush=True)
+                    if stderr:
+                        print(f"[Scrcpy] scrcpy stderr: {stderr}", flush=True)
+                    if ffmpeg_process:
+                        try:
+                            ffmpeg_process.terminate()
+                        except:
+                            pass
+                    return None
+                
+                # Check if ffmpeg process is still running
+                if ffmpeg_process.poll() is not None:
+                    exit_code = ffmpeg_process.returncode
+                    stderr = ""
+                    try:
+                        if ffmpeg_process.stderr:
+                            stderr = ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                    except:
+                        pass
+                    print(f"[Scrcpy] ffmpeg process exited during initialization (code {exit_code})", flush=True)
+                    if stderr:
+                        print(f"[Scrcpy] ffmpeg stderr: {stderr}", flush=True)
+                    if process:
+                        try:
+                            process.terminate()
+                        except:
+                            pass
+                    return None
+                
                 # Check if scrcpy stdout has data (peek at first few bytes)
-                time.sleep(2)  # Wait for scrcpy to start outputting
+                time.sleep(2)  # Wait a bit more for scrcpy to start outputting
                 if sys.platform != 'win32':
                     try:
                         fd = process.stdout.fileno()
-                        ready, _, _ = select.select([fd], [], [], 0.1)
+                        ready, _, _ = select.select([fd], [], [], 0.5)
                         if ready:
                             print(f"[Scrcpy] scrcpy stdout is readable (fd={fd})", flush=True)
                         else:
                             print(f"[Scrcpy] scrcpy stdout not ready yet (fd={fd})", flush=True)
+                            # Check if scrcpy process is still running
+                            if process.poll() is not None:
+                                print(f"[Scrcpy] WARNING: scrcpy process exited (code {process.returncode})", flush=True)
+                                # Try to read stderr for more info
+                                try:
+                                    if process.stderr:
+                                        stderr_data = process.stderr.read()
+                                        if stderr_data:
+                                            print(f"[Scrcpy] scrcpy stderr (after exit): {stderr_data.decode('utf-8', errors='ignore')}", flush=True)
+                                except:
+                                    pass
                     except Exception as e:
                         print(f"[Scrcpy] Error checking scrcpy stdout: {e}", flush=True)
                 
@@ -970,11 +1045,40 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 _scrcpy_connections[key] = conn
                 print(f"[Scrcpy] Connection established successfully for device {key} (stdout mode)", flush=True)
                 return conn
+            except FileNotFoundError:
+                print("[Scrcpy] ffmpeg not found, cannot decode H.264 stream. Please install ffmpeg: https://ffmpeg.org/download.html", flush=True)
+                if process:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=2)
+                    except:
+                        try:
+                            process.kill()
+                        except:
+                            pass
+                return None
             except Exception as e:
                 print(f"[Scrcpy] Failed to start ffmpeg: {type(e).__name__}: {e}", flush=True)
                 import traceback
                 print(f"[Scrcpy] Traceback: {traceback.format_exc()}", flush=True)
-                process.terminate()
+                if process:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=2)
+                    except:
+                        try:
+                            process.kill()
+                        except:
+                            pass
+                if ffmpeg_process:
+                    try:
+                        ffmpeg_process.terminate()
+                        ffmpeg_process.wait(timeout=2)
+                    except:
+                        try:
+                            ffmpeg_process.kill()
+                        except:
+                            pass
                 return None
         else:
             # Use FIFO (original method)
@@ -993,34 +1097,45 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
             # Use -loglevel info to see when ffmpeg starts reading input
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-loglevel", "warning",  # Reduce log noise, but keep warnings/errors
+                "-loglevel", "warning",  # Use warning level to reduce noise
                 "-probesize", "32768",  # Smaller probe size for faster startup
                 "-analyzeduration", "1000000",  # Reduced analysis duration (1 second) for faster startup
                 "-fflags", "nobuffer+discardcorrupt",  # Reduce buffering and discard corrupt frames
                 "-flags", "low_delay",  # Low delay mode for real-time streaming
                 "-thread_queue_size", "512",  # Larger queue for better buffering
+                "-err_detect", "ignore_err",  # Ignore errors and continue decoding
                 "-f", "matroska",  # Input format is MKV (from scrcpy --record-format=mkv)
                 "-i", fifo_path,  # Read from named pipe (FIFO)
-                # Don't use fps filter - it causes "No filtered frames" issue
-                # Instead, use -frames:v to limit output (but we'll read continuously)
-                # Actually, let's try without any filter and see if we can read frames
+                # Force output frames immediately
                 "-f", "image2pipe",  # Output as image stream
                 "-vcodec", "png",  # PNG format
                 "-pix_fmt", "rgb24",  # Use RGB24 pixel format for better compatibility
-                "-vsync", "0",  # Don't sync video, output frames as they come
+                "-fps_mode", "passthrough",  # Use fps_mode instead of deprecated -vsync
+                "-update", "1",  # Force output of each frame (important for image2pipe)
+                "-flush_packets", "1",  # Flush packets immediately to reduce latency
                 "-"  # Output to stdout
             ]
             
             print(f"[Scrcpy] Starting ffmpeg with command: {' '.join(ffmpeg_cmd)}", flush=True)
             
-            # Open FIFO for reading (this will block until scrcpy starts writing)
-            # We need to open it in a separate thread or use non-blocking mode
+            # IMPORTANT: Start ffmpeg AFTER scrcpy has started (but scrcpy may not have opened FIFO yet)
+            # FIFO behavior: 
+            # - If only reader opens FIFO, it blocks until writer opens
+            # - If only writer opens FIFO, it blocks until reader opens
+            # - Both need to be open for data to flow
+            # scrcpy will open FIFO when it's ready to start recording
+            # ffmpeg will block on opening FIFO until scrcpy opens it for writing
+            print(f"[Scrcpy] Starting ffmpeg to read from FIFO (will block until scrcpy opens FIFO for writing)...", flush=True)
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0
             )
+            
+            # Give ffmpeg a moment to attempt opening the FIFO
+            # This will block until scrcpy opens the FIFO for writing
+            time.sleep(1)
             
             # Start threads to monitor both scrcpy and ffmpeg stderr for debugging
             def monitor_scrcpy_stderr():
@@ -1113,6 +1228,23 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
             # 4. Start encoding and outputting data
             # Based on testing, scrcpy needs at least 3-5 seconds to start outputting data
             print(f"[Scrcpy] Waiting for scrcpy to start streaming and ffmpeg to decode...", flush=True)
+            print(f"[Scrcpy] FIFO path: {fifo_path}", flush=True)
+            print(f"[Scrcpy] Checking if FIFO exists and is accessible...", flush=True)
+            if fifo_path and os.path.exists(fifo_path):
+                print(f"[Scrcpy] FIFO exists: {fifo_path}", flush=True)
+                # Check FIFO permissions and type
+                try:
+                    import stat
+                    fifo_stat = os.stat(fifo_path)
+                    fifo_mode = stat.filemode(fifo_stat.st_mode)
+                    print(f"[Scrcpy] FIFO stat: mode={fifo_mode}, size={fifo_stat.st_size}", flush=True)
+                    # Check if it's actually a FIFO
+                    if not stat.S_ISFIFO(fifo_stat.st_mode):
+                        print(f"[Scrcpy] WARNING: Path exists but is not a FIFO!", flush=True)
+                except Exception as e:
+                    print(f"[Scrcpy] Error checking FIFO stat: {e}", flush=True)
+            else:
+                print(f"[Scrcpy] WARNING: FIFO does not exist: {fifo_path}", flush=True)
             
             # Wait for scrcpy to start outputting data (can take 5-10 seconds)
             # scrcpy needs time to establish connection and start encoding
@@ -1122,7 +1254,18 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 # Check if scrcpy process is still running
                 if process.poll() is not None:
                     exit_code = process.returncode
+                    stderr = ""
+                    try:
+                        if process.stderr:
+                            # Try to read remaining stderr
+                            remaining_stderr = process.stderr.read()
+                            if remaining_stderr:
+                                stderr = remaining_stderr.decode('utf-8', errors='ignore')
+                    except:
+                        pass
                     print(f"[Scrcpy] scrcpy process exited during wait (code {exit_code})", flush=True)
+                    if stderr:
+                        print(f"[Scrcpy] scrcpy stderr (full): {stderr}", flush=True)
                     if ffmpeg_process:
                         ffmpeg_process.terminate()
                     # Clean up FIFO on error
@@ -1138,12 +1281,15 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                     stderr = ""
                     try:
                         if ffmpeg_process.stderr:
-                            stderr = ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                            # Try to read remaining stderr
+                            remaining_stderr = ffmpeg_process.stderr.read()
+                            if remaining_stderr:
+                                stderr = remaining_stderr.decode('utf-8', errors='ignore')
                     except:
                         pass
                     print(f"[Scrcpy] ffmpeg process exited during wait (code {exit_code})", flush=True)
                     if stderr:
-                        print(f"[Scrcpy] ffmpeg stderr: {stderr}", flush=True)
+                        print(f"[Scrcpy] ffmpeg stderr (full): {stderr}", flush=True)
                     if process:
                         process.terminate()
                     # Clean up FIFO on error
@@ -1156,6 +1302,14 @@ def _connect_scrcpy(device_id: str | None, max_size: int = 720,
                 # Log progress every 2 seconds
                 if i > 0 and i % 4 == 0:  # Every 2 seconds
                     print(f"[Scrcpy] Still waiting for scrcpy to start streaming... ({i * 0.5:.1f}s)", flush=True)
+                    # Check if FIFO is being written to (on macOS/Linux)
+                    if sys.platform != 'win32' and fifo_path and os.path.exists(fifo_path):
+                        try:
+                            import stat
+                            fifo_stat = os.stat(fifo_path)
+                            print(f"[Scrcpy] FIFO stat: mode={oct(fifo_stat.st_mode)}, size={fifo_stat.st_size}", flush=True)
+                        except Exception as e:
+                            print(f"[Scrcpy] Could not stat FIFO: {e}", flush=True)
             
             # Check scrcpy process status again
             if process.poll() is not None:
@@ -1324,20 +1478,25 @@ def get_screenshot_scrcpy(device_id: str | None = None, timeout: int = 10,
     This method is much faster than traditional ADB screenshot methods,
     but requires scrcpy and ffmpeg to be installed.
     
+    The implementation uses scrcpy's stdout mode (--record=-) to output
+    MKV video stream, which is then decoded by ffmpeg to extract frames.
+    This approach is simpler and more reliable than direct socket connection.
+    
     Args:
         device_id: Optional ADB device ID
-        timeout: Timeout in seconds (not used for scrcpy)
+        timeout: Timeout in seconds (not used for scrcpy, but used for frame wait)
         quality: JPEG quality (1-100)
         max_width: Maximum width to resize to
         bit_rate: Video bitrate in bps (default 2Mbps)
         max_fps: Maximum frame rate (default 60)
     
     Returns:
-        Screenshot object or None if scrcpy is not available
+        Screenshot object or None if scrcpy is not available or connection fails
     """
     try:
-        # Connect to scrcpy
-        conn = _connect_scrcpy(device_id, max_width, bit_rate, max_fps, use_socket=True)
+        # Connect to scrcpy using FIFO mode (more reliable than stdout mode)
+        # FIFO mode avoids potential deadlock issues with --record=- stdout mode
+        conn = _connect_scrcpy(device_id, max_width, bit_rate, max_fps, use_socket=False)
         if not conn:
             print(f"[Scrcpy] get_screenshot_scrcpy: Failed to connect for device {device_id}", flush=True)
             return None

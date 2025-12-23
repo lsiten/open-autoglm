@@ -152,7 +152,30 @@ async def device_swipe(req: SwipeRequest):
 
 @router.post("/stream/settings")
 async def update_stream_settings(req: StreamSettingsRequest):
+    # Update screen streamer settings (for fallback image streaming)
     screen_streamer.update_settings(req.quality, req.max_width, req.fps)
+    
+    # Update video streamer settings (for scrcpy H.264 video streaming)
+    # Convert max_width to max_size for video streamer
+    if req.max_width:
+        # Calculate bit_rate based on resolution for better quality
+        # Higher resolution needs higher bitrate
+        if req.max_width >= 1080:
+            bit_rate = 8000000  # 8Mbps for 1080p
+        elif req.max_width >= 720:
+            bit_rate = 5000000  # 5Mbps for 720p
+        elif req.max_width >= 480:
+            bit_rate = 3000000  # 3Mbps for 480p
+        else:
+            bit_rate = 2000000  # 2Mbps for 360p
+        
+        video_streamer.update_settings(
+            max_size=req.max_width,
+            bit_rate=bit_rate,
+            max_fps=req.fps
+        )
+        print(f"[Control] Updated video stream settings: max_size={req.max_width}, bit_rate={bit_rate/1000000:.1f}Mbps, fps={req.fps}", flush=True)
+    
     return {"status": "updated", "settings": req.dict(exclude_none=True)}
 
 @router.get("/stream/latest")
@@ -423,8 +446,20 @@ async def get_video_stream():
     });
     ```
     """
+    device_id = device_manager.active_device_id
+    print(f"[Control] Video stream request received, device_id={device_id}", flush=True)
+    
+    if not device_id:
+        print("[Control] ERROR: No active device for video stream", flush=True)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No active device"}
+        )
+    
+    print(f"[Control] Starting video stream for device: {device_id}", flush=True)
     return StreamingResponse(
-        video_streamer.generate_mp4_stream(),
+        video_streamer.generate_mp4_stream(device_id=device_id),
         media_type="video/mp4",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
